@@ -115,123 +115,76 @@ class GeneralChatService:
                 # Check for tool use in the response
                 tool_use_blocks = [b for b in response_content if b.type == "tool_use"]
 
-                if tool_use_blocks:
-                    # Handle tool call
-                    tool_block = tool_use_blocks[0]
-                    tool_name = tool_block.name
-                    tool_input = tool_block.input
-                    tool_use_id = tool_block.id
-
-                    logger.info(f"Tool call: {tool_name} with input: {tool_input}")
-
-                    # Send tool starting status
-                    logger.info(f"Sending tool running status for {tool_name}")
-                    tool_status = ChatStatusResponse(
-                        status=f"Running {tool_name}...",
-                        payload={"tool": tool_name, "phase": "running"},
-                        error=None,
-                        debug=None
-                    )
-                    yield tool_status.model_dump_json()
-
-                    # Execute tool
-                    tool_config = tools_by_name.get(tool_name)
-                    tool_result_str = ""
-
-                    if tool_config:
-                        try:
-                            tool_result = await asyncio.to_thread(
-                                tool_config.executor,
-                                tool_input,
-                                self.db,
-                                self.user_id,
-                                request.context
-                            )
-
-                            if isinstance(tool_result, ToolResult):
-                                tool_result_str = tool_result.text
-                                tool_output_data = tool_result.data
-                            elif isinstance(tool_result, str):
-                                tool_result_str = tool_result
-                                tool_output_data = None
-                            else:
-                                tool_result_str = str(tool_result)
-                                tool_output_data = None
-
-                        except Exception as e:
-                            logger.error(f"Tool execution error: {e}", exc_info=True)
-                            tool_result_str = f"Error executing tool: {str(e)}"
-                            tool_output_data = None
-                    else:
-                        tool_result_str = f"Unknown tool: {tool_name}"
-                        tool_output_data = None
-
-                    # Record tool call in history
-                    tool_call_history.append({
-                        "tool_name": tool_name,
-                        "input": tool_input,
-                        "output": tool_output_data if tool_output_data else tool_result_str
-                    })
-
-                    # Send tool completed status
-                    logger.info(f"Sending tool completed status for {tool_name}")
-                    tool_complete_status = ChatStatusResponse(
-                        status=f"Completed {tool_name}",
-                        payload={"tool": tool_name, "phase": "completed"},
-                        error=None,
-                        debug=None
-                    )
-                    yield tool_complete_status.model_dump_json()
-
-                    # Add tool interaction to messages for next iteration
-                    assistant_content = []
-                    for block in response_content:
-                        if block.type == "text":
-                            assistant_content.append({"type": "text", "text": block.text})
-                        elif block.type == "tool_use":
-                            assistant_content.append({
-                                "type": "tool_use",
-                                "id": block.id,
-                                "name": block.name,
-                                "input": block.input
-                            })
-                    messages.append({
-                        "role": "assistant",
-                        "content": assistant_content
-                    })
-                    messages.append({
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": tool_result_str
-                            }
-                        ]
-                    })
-
-                    # Update api_kwargs with new messages for next iteration
-                    api_kwargs["messages"] = messages
-
-                    # Add newline separator before next iteration's text
-                    separator = "\n\n"
-                    collected_text += separator
-                    separator_response = ChatStreamChunk(
-                        token=separator,
-                        response_text=None,
-                        payload=None,
-                        status="streaming",
-                        error=None,
-                        debug=None
-                    )
-                    yield separator_response.model_dump_json()
-
-                    continue
-
-                else:
-                    # No tool call - we're done
+                # No tool call - we're done
+                if not tool_use_blocks:
                     logger.info(f"No tool call, response complete. Collected text length: {len(collected_text)}")
                     break
+
+                # Handle tool call
+                tool_block = tool_use_blocks[0]
+                tool_name = tool_block.name
+                tool_input = tool_block.input
+                tool_use_id = tool_block.id
+
+                logger.info(f"Tool call: {tool_name} with input: {tool_input}")
+
+                # Send tool starting status
+                tool_status = ChatStatusResponse(
+                    status=f"Running {tool_name}...",
+                    payload={"tool": tool_name, "phase": "running"},
+                    error=None,
+                    debug=None
+                )
+                yield tool_status.model_dump_json()
+
+                # Execute tool
+                tool_result_str, tool_output_data = await self._execute_tool(
+                    tool_name, tool_input, tools_by_name, request.context
+                )
+
+                # Record tool call in history
+                tool_call_history.append({
+                    "tool_name": tool_name,
+                    "input": tool_input,
+                    "output": tool_output_data if tool_output_data else tool_result_str
+                })
+
+                # Send tool completed status
+                tool_complete_status = ChatStatusResponse(
+                    status=f"Completed {tool_name}",
+                    payload={"tool": tool_name, "phase": "completed"},
+                    error=None,
+                    debug=None
+                )
+                yield tool_complete_status.model_dump_json()
+
+                # Add tool interaction to messages for next iteration
+                assistant_content = self._format_assistant_content(response_content)
+                messages.append({"role": "assistant", "content": assistant_content})
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": tool_result_str
+                    }]
+                })
+
+                # Update api_kwargs with new messages for next iteration
+                api_kwargs["messages"] = messages
+
+                # Add newline separator before next iteration's text
+                separator = "\n\n"
+                collected_text += separator
+                separator_response = ChatStreamChunk(
+                    token=separator,
+                    response_text=None,
+                    payload=None,
+                    status="streaming",
+                    error=None,
+                    debug=None
+                )
+                yield separator_response.model_dump_json()
 
             # Build final payload
             logger.info(f"Building final payload with collected_text length: {len(collected_text)}, tool_calls: {len(tool_call_history)}")
@@ -302,3 +255,51 @@ class GeneralChatService:
 
         Remember: You have real capabilities. Use them to actually help, not just to describe what you could theoretically do.
         """
+
+    async def _execute_tool(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        tools_by_name: Dict[str, Any],
+        context: Dict[str, Any]
+    ) -> tuple[str, Any]:
+        """Execute a tool and return (result_str, output_data)."""
+        tool_config = tools_by_name.get(tool_name)
+
+        if not tool_config:
+            return f"Unknown tool: {tool_name}", None
+
+        try:
+            tool_result = await asyncio.to_thread(
+                tool_config.executor,
+                tool_input,
+                self.db,
+                self.user_id,
+                context
+            )
+
+            if isinstance(tool_result, ToolResult):
+                return tool_result.text, tool_result.data
+            elif isinstance(tool_result, str):
+                return tool_result, None
+            else:
+                return str(tool_result), None
+
+        except Exception as e:
+            logger.error(f"Tool execution error: {e}", exc_info=True)
+            return f"Error executing tool: {str(e)}", None
+
+    def _format_assistant_content(self, response_content: list) -> list:
+        """Format response content blocks for Anthropic API."""
+        assistant_content = []
+        for block in response_content:
+            if block.type == "text":
+                assistant_content.append({"type": "text", "text": block.text})
+            elif block.type == "tool_use":
+                assistant_content.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input
+                })
+        return assistant_content
