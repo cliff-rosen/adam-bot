@@ -1,34 +1,28 @@
 """
-Chat Payloads Package
+Chat Tools Package for CMR Bot
 
-This package contains the payload configuration registry for the chat system.
-Page-specific payload configurations can be registered to provide rich interactions.
+This package contains the tool registry and built-in tools for the primary agent.
 """
 
 from .registry import (
-    PayloadConfig,
-    PageConfig,
-    ClientAction,
     ToolConfig,
     ToolResult,
-    get_page_payloads,
-    get_page_context_builder,
-    get_page_client_actions,
-    get_page_tools,
-    has_page_payloads,
-    register_page
+    register_tool,
+    get_tool,
+    get_all_tools,
+    get_tools_by_category,
+    get_tools_for_anthropic
 )
 
+from .tools import register_builtin_tools
+
 __all__ = [
-    'PayloadConfig',
-    'PageConfig',
-    'ClientAction',
     'ToolConfig',
     'ToolResult',
-    'get_page_payloads',
-    'get_page_context_builder',
-    'get_page_client_actions',
-    'get_page_tools',
-    'has_page_payloads',
-    'register_page'
+    'register_tool',
+    'get_tool',
+    'get_all_tools',
+    'get_tools_by_category',
+    'get_tools_for_anthropic',
+    'register_builtin_tools'
 ]

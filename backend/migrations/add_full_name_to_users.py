@@ -3,7 +3,7 @@
 Migration script to add full_name field to the User table.
 
 This script adds the full_name field to support storing user's full name
-from the Knowledge Horizon onboarding process.
+from the CMR Bot onboarding process.
 """
 
 import sys

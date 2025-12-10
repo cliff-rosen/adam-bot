@@ -14,7 +14,7 @@ import logging
 import time
 import traceback
 
-# Session management removed - Knowledge Horizon uses simplified auth
+# Session management removed - CMR Bot uses simplified auth
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = settings.JWT_SECRET_KEY
