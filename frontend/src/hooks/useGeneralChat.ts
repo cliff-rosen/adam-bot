@@ -57,8 +57,9 @@ export function useGeneralChat(initialContext?: Record<string, any>) {
                     break;
                 }
 
-                // Handle status updates (e.g., "Thinking...", "Using search_pubmed...")
+                // Handle status updates (e.g., "Thinking...", "Running web_search...")
                 if (chunk.status && chunk.status !== 'streaming' && chunk.status !== 'complete') {
+                    console.log('[useGeneralChat] Status update:', chunk.status);
                     setStatusText(chunk.status);
                 }
 

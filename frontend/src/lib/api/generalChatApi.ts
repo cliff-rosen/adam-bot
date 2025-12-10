@@ -54,9 +54,13 @@ export const generalChatApi = {
                         const jsonStr = line.slice(6);
                         try {
                             const data = JSON.parse(jsonStr);
+                            // Log non-streaming status updates
+                            if (data.status && data.status !== 'streaming') {
+                                console.log('[SSE] Received status:', data.status);
+                            }
                             yield data;
                         } catch (e) {
-                            console.error('Failed to parse stream data:', e);
+                            console.error('Failed to parse stream data:', jsonStr, e);
                         }
                     }
                 }

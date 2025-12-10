@@ -118,5 +118,9 @@ async def chat_stream(
 
     return EventSourceResponse(
         event_generator(),
-        ping=1  # Send ping every 1 second to keep connection alive and flush buffers
+        ping=1,  # Send ping every 1 second to keep connection alive
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
     )

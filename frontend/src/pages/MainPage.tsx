@@ -182,18 +182,27 @@ export default function MainPage() {
                         <div className="flex justify-start">
                             <div className="max-w-[85%] rounded-lg px-4 py-3 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-white">
                                 <MarkdownRenderer content={streamingText} />
-                                <div className="flex items-center gap-1 mt-2">
-                                    <div className="animate-pulse flex gap-1">
-                                        <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                                        <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                                        <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
-                                    </div>
+                                <div className="flex items-center gap-2 mt-2">
+                                    {statusText ? (
+                                        <>
+                                            <WrenchScrewdriverIcon className="h-4 w-4 text-blue-600 dark:text-blue-400 animate-pulse" />
+                                            <span className="text-sm text-blue-600 dark:text-blue-400">
+                                                {statusText}
+                                            </span>
+                                        </>
+                                    ) : isLoading ? (
+                                        <div className="animate-pulse flex gap-1">
+                                            <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
+                                            <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
+                                            <div className="w-1.5 h-1.5 bg-blue-600 rounded-full"></div>
+                                        </div>
+                                    ) : null}
                                 </div>
                             </div>
                         </div>
                     )}
 
-                    {/* Loading indicator */}
+                    {/* Loading indicator - only when no streaming text yet */}
                     {isLoading && !streamingText && (
                         <div className="flex justify-start">
                             <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3">
