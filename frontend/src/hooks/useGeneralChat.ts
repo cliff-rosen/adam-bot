@@ -100,9 +100,11 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
 
                 // Handle final payload
                 if (chunk.payload && chunk.status === 'complete') {
-                    // Update conversation ID if returned
-                    if (chunk.payload.conversation_id) {
+                    // Update conversation ID if returned (new conversation was created)
+                    if (chunk.payload.conversation_id && chunk.payload.conversation_id !== conversationId) {
                         setConversationId(chunk.payload.conversation_id);
+                        // Refresh conversation list to include the new conversation
+                        conversationApi.list(50).then(convs => setConversations(convs)).catch(console.error);
                     }
 
                     const assistantMessage: GeneralChatMessage = {
