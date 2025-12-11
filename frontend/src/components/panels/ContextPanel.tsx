@@ -3,7 +3,7 @@ import {
     WrenchScrewdriverIcon, XMarkIcon, PlusIcon, DocumentIcon,
     CpuChipIcon, LightBulbIcon, BookmarkIcon, Cog6ToothIcon,
     ArrowsPointingOutIcon, UserIcon, HeartIcon, BuildingOfficeIcon,
-    FolderIcon, ClockIcon, TrashIcon
+    FolderIcon, ClockIcon, XCircleIcon
 } from '@heroicons/react/24/solid';
 import { Memory, MemoryType, Asset } from '../../lib/api';
 import { ToolCall } from '../../types/chat';
@@ -202,10 +202,10 @@ export default function ContextPanel({
                                 {contextAssets.length > 0 && (
                                     <button
                                         onClick={onClearAllAssetsFromContext}
-                                        className="p-1 text-gray-400 hover:text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                                        className="p-1 text-gray-400 hover:text-orange-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
                                         title="Clear all from context"
                                     >
-                                        <TrashIcon className="h-4 w-4" />
+                                        <XCircleIcon className="h-4 w-4" />
                                     </button>
                                 )}
                                 <button
