@@ -3,7 +3,14 @@ import { ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/solid';
 import { useGeneralChat } from '../hooks/useGeneralChat';
 import { InteractionType, ToolCall } from '../types/chat';
 import { memoryApi, Memory, assetApi, Asset } from '../lib/api';
-import { ConversationSidebar, ChatPanel, WorkspacePanel, ContextPanel } from '../components/panels';
+import {
+    ConversationSidebar,
+    ChatPanel,
+    WorkspacePanel,
+    ContextPanel,
+    MemoryBrowserModal,
+    AssetBrowserModal
+} from '../components/panels';
 
 const SIDEBAR_WIDTH = 256;
 const CONTEXT_PANEL_WIDTH = 280;
@@ -37,6 +44,10 @@ export default function MainPage() {
     const [isContextPanelOpen, setIsContextPanelOpen] = useState(true);
     const [workspaceWidth, setWorkspaceWidth] = useState(400);
     const [isDragging, setIsDragging] = useState(false);
+
+    // Modal state
+    const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
+    const [isAssetModalOpen, setIsAssetModalOpen] = useState(false);
 
     // Content state
     const [selectedToolHistory, setSelectedToolHistory] = useState<ToolCall[] | null>(null);
@@ -203,6 +214,15 @@ export default function MainPage() {
         }
     };
 
+    const handleDeleteAsset = async (assetId: number) => {
+        try {
+            await assetApi.delete(assetId);
+            setAssets(prev => prev.filter(a => a.asset_id !== assetId));
+        } catch (err) {
+            console.error('Failed to delete asset:', err);
+        }
+    };
+
     // Workspace handlers
     const handleSaveToolOutputAsAsset = async (toolCall: ToolCall) => {
         try {
@@ -313,11 +333,30 @@ export default function MainPage() {
                     lastToolHistory={lastToolHistory}
                     onAddWorkingMemory={handleAddWorkingMemory}
                     onToggleMemoryPinned={handleToggleMemoryPinned}
-                    onDeleteMemory={handleDeleteMemory}
                     onToggleAssetContext={handleToggleAssetContext}
                     onToolHistoryClick={setSelectedToolHistory}
+                    onExpandMemories={() => setIsMemoryModalOpen(true)}
+                    onExpandAssets={() => setIsAssetModalOpen(true)}
                 />
             </div>
+
+            {/* Memory Browser Modal */}
+            <MemoryBrowserModal
+                isOpen={isMemoryModalOpen}
+                memories={memories}
+                onClose={() => setIsMemoryModalOpen(false)}
+                onTogglePinned={handleToggleMemoryPinned}
+                onDelete={handleDeleteMemory}
+            />
+
+            {/* Asset Browser Modal */}
+            <AssetBrowserModal
+                isOpen={isAssetModalOpen}
+                assets={assets}
+                onClose={() => setIsAssetModalOpen(false)}
+                onToggleContext={handleToggleAssetContext}
+                onDelete={handleDeleteAsset}
+            />
         </div>
     );
 }
