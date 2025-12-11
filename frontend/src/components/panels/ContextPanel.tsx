@@ -69,6 +69,11 @@ export default function ContextPanel({
     onEditProfile
 }: ContextPanelProps) {
     const [newMemoryInput, setNewMemoryInput] = useState('');
+
+    // Section collapse state
+    const [isAssetsExpanded, setIsAssetsExpanded] = useState(true);
+    const [isToolsExpanded, setIsToolsExpanded] = useState(true);
+    const [isMemoriesExpanded, setIsMemoriesExpanded] = useState(true);
     const [isProfileExpanded, setIsProfileExpanded] = useState(false);
 
     // Memories: pinned + last 3 unpinned
@@ -109,6 +114,279 @@ export default function ContextPanel({
 
             {/* Panel Content */}
             <div className="flex-1 overflow-y-auto min-w-[280px]">
+                {/* TODO: Active Workflow Section (when workflow is active) */}
+
+                {/* Assets Section */}
+                <div className="border-b border-gray-200 dark:border-gray-700">
+                    <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
+                        <div className="flex items-center justify-between">
+                            <button
+                                onClick={() => setIsAssetsExpanded(!isAssetsExpanded)}
+                                className="flex items-center gap-2"
+                            >
+                                {isAssetsExpanded ? (
+                                    <ChevronDownIcon className="h-3 w-3 text-gray-500" />
+                                ) : (
+                                    <ChevronRightIcon className="h-3 w-3 text-gray-500" />
+                                )}
+                                <DocumentIcon className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                                    Assets
+                                </span>
+                                <span className="text-xs text-gray-500">({assets.length})</span>
+                            </button>
+                            <div className="flex items-center gap-1">
+                                {contextAssets.length > 0 && (
+                                    <button
+                                        onClick={onClearAllAssetsFromContext}
+                                        className="p-1 text-gray-400 hover:text-orange-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                                        title="Clear all from context"
+                                    >
+                                        <XCircleIcon className="h-4 w-4" />
+                                    </button>
+                                )}
+                                <button
+                                    onClick={onExpandAssets}
+                                    className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                                    title="Expand assets"
+                                >
+                                    <ArrowsPointingOutIcon className="h-4 w-4" />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    {isAssetsExpanded && (
+                        <div className="p-2 space-y-1">
+                            {/* Assets in context */}
+                            {contextAssets.length === 0 ? (
+                                <div className="text-center text-gray-400 dark:text-gray-500 text-xs py-2">
+                                    No assets in context
+                                </div>
+                            ) : (
+                                <>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1 font-medium">
+                                        In Context ({contextAssets.length})
+                                    </div>
+                                    {contextAssets.map((asset) => (
+                                        <div key={asset.asset_id} className="flex items-center gap-2 px-2 py-1.5 rounded bg-orange-50 dark:bg-orange-900/20">
+                                            <span className="flex-1 text-gray-700 dark:text-gray-300 text-xs truncate">{asset.name}</span>
+                                            <button
+                                                onClick={() => onToggleAssetContext(asset.asset_id)}
+                                                className="text-gray-400 hover:text-red-500 flex-shrink-0"
+                                                title="Remove from context"
+                                            >
+                                                <XMarkIcon className="h-3 w-3" />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </>
+                            )}
+
+                            {/* Recent available assets (top 5) */}
+                            {recentAvailableAssets.length > 0 && (
+                                <>
+                                    <div className="text-xs text-gray-400 dark:text-gray-500 px-2 py-1 mt-2">
+                                        Recent
+                                    </div>
+                                    {recentAvailableAssets.map((asset) => (
+                                        <button
+                                            key={asset.asset_id}
+                                            onClick={() => onToggleAssetContext(asset.asset_id)}
+                                            className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                                        >
+                                            <PlusIcon className="h-3 w-3" />
+                                            <span className="truncate">{asset.name}</span>
+                                        </button>
+                                    ))}
+                                    {hiddenAssetCount > 0 && (
+                                        <button
+                                            onClick={onExpandAssets}
+                                            className="w-full text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-1"
+                                        >
+                                            +{hiddenAssetCount} more...
+                                        </button>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    )}
+                </div>
+
+                {/* Tools Section */}
+                <div className="border-b border-gray-200 dark:border-gray-700">
+                    <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
+                        <button
+                            onClick={() => setIsToolsExpanded(!isToolsExpanded)}
+                            className="flex items-center gap-2"
+                        >
+                            {isToolsExpanded ? (
+                                <ChevronDownIcon className="h-3 w-3 text-gray-500" />
+                            ) : (
+                                <ChevronRightIcon className="h-3 w-3 text-gray-500" />
+                            )}
+                            <WrenchScrewdriverIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                            <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                                Tools
+                            </span>
+                            <span className="text-xs text-gray-500">({enabledToolCount}/{AVAILABLE_TOOLS.length})</span>
+                        </button>
+                    </div>
+                    {isToolsExpanded && (
+                        <div className="p-2 space-y-1">
+                            {AVAILABLE_TOOLS.map(tool => {
+                                const isEnabled = enabledTools.has(tool.id);
+                                return (
+                                    <button
+                                        key={tool.id}
+                                        onClick={() => onToggleTool(tool.id)}
+                                        className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
+                                            isEnabled
+                                                ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
+                                                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                        }`}
+                                    >
+                                        {isEnabled ? (
+                                            <CheckIcon className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
+                                        ) : (
+                                            <CheckCircleOutlineIcon className="h-3.5 w-3.5 flex-shrink-0" />
+                                        )}
+                                        <span className="flex-1 text-left">{tool.name}</span>
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {/* Memories Section */}
+                <div className="border-b border-gray-200 dark:border-gray-700">
+                    <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
+                        <div className="flex items-center justify-between">
+                            <button
+                                onClick={() => setIsMemoriesExpanded(!isMemoriesExpanded)}
+                                className="flex items-center gap-2"
+                            >
+                                {isMemoriesExpanded ? (
+                                    <ChevronDownIcon className="h-3 w-3 text-gray-500" />
+                                ) : (
+                                    <ChevronRightIcon className="h-3 w-3 text-gray-500" />
+                                )}
+                                <LightBulbIcon className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
+                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                                    Memories
+                                </span>
+                                <span className="text-xs text-gray-500">({totalMemoryCount})</span>
+                            </button>
+                            <button
+                                onClick={onExpandMemories}
+                                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                                title="Expand memories"
+                            >
+                                <ArrowsPointingOutIcon className="h-4 w-4" />
+                            </button>
+                        </div>
+                    </div>
+
+                    {isMemoriesExpanded && (
+                        <>
+                            {/* Quick add note */}
+                            <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
+                                <div className="flex gap-1">
+                                    <input
+                                        type="text"
+                                        value={newMemoryInput}
+                                        onChange={(e) => setNewMemoryInput(e.target.value)}
+                                        onKeyDown={(e) => e.key === 'Enter' && handleAddMemory()}
+                                        placeholder="Quick note..."
+                                        className="flex-1 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                                    />
+                                    <button
+                                        onClick={handleAddMemory}
+                                        className="px-2 py-1 text-xs bg-yellow-500 text-white rounded hover:bg-yellow-600"
+                                    >
+                                        +
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Pinned + Recent memories */}
+                            <div className="p-2 space-y-1">
+                                {pinnedMemories.length === 0 && recentUnpinnedMemories.length === 0 ? (
+                                    <div className="text-center text-gray-400 dark:text-gray-500 text-xs py-3">
+                                        No memories yet
+                                    </div>
+                                ) : (
+                                    <>
+                                        {/* Pinned memories */}
+                                        {pinnedMemories.map((mem) => {
+                                            const typeInfo = getMemoryTypeInfo(mem.memory_type);
+                                            return (
+                                                <div
+                                                    key={mem.memory_id}
+                                                    className={`flex items-start gap-2 px-2 py-1.5 rounded ${typeInfo.bg}`}
+                                                >
+                                                    <BookmarkIcon className="h-3 w-3 mt-0.5 flex-shrink-0 text-blue-500" />
+                                                    <span className="flex-1 text-gray-700 dark:text-gray-300 text-xs leading-relaxed line-clamp-2">
+                                                        {mem.content}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => onToggleMemoryPinned(mem.memory_id)}
+                                                        className="text-blue-500 hover:text-blue-600 flex-shrink-0"
+                                                        title="Unpin"
+                                                    >
+                                                        <XMarkIcon className="h-3 w-3" />
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+
+                                        {/* Divider if both pinned and recent exist */}
+                                        {pinnedMemories.length > 0 && recentUnpinnedMemories.length > 0 && (
+                                            <div className="text-xs text-gray-400 dark:text-gray-500 px-2 py-1">
+                                                Recent
+                                            </div>
+                                        )}
+
+                                        {/* Recent unpinned memories */}
+                                        {recentUnpinnedMemories.map((mem) => {
+                                            const typeInfo = getMemoryTypeInfo(mem.memory_type);
+                                            const TypeIcon = typeInfo.icon;
+                                            return (
+                                                <div
+                                                    key={mem.memory_id}
+                                                    className="flex items-start gap-2 px-2 py-1.5 rounded bg-gray-50 dark:bg-gray-800/50"
+                                                >
+                                                    <TypeIcon className={`h-3 w-3 mt-0.5 flex-shrink-0 ${typeInfo.color}`} />
+                                                    <span className="flex-1 text-gray-700 dark:text-gray-300 text-xs leading-relaxed line-clamp-2">
+                                                        {mem.content}
+                                                    </span>
+                                                    <button
+                                                        onClick={() => onToggleMemoryPinned(mem.memory_id)}
+                                                        className="text-gray-400 hover:text-blue-500 flex-shrink-0"
+                                                        title="Pin"
+                                                    >
+                                                        <BookmarkIcon className="h-3 w-3" />
+                                                    </button>
+                                                </div>
+                                            );
+                                        })}
+
+                                        {/* Show more indicator */}
+                                        {hiddenMemoryCount > 0 && (
+                                            <button
+                                                onClick={onExpandMemories}
+                                                className="w-full text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-1"
+                                            >
+                                                +{hiddenMemoryCount} more...
+                                            </button>
+                                        )}
+                                    </>
+                                )}
+                            </div>
+                        </>
+                    )}
+                </div>
+
                 {/* Profile Section */}
                 <div className="border-b border-gray-200 dark:border-gray-700">
                     <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
@@ -195,245 +473,6 @@ export default function ContextPanel({
                             )}
                         </div>
                     )}
-                </div>
-
-                {/* Tools Section */}
-                <div className="border-b border-gray-200 dark:border-gray-700">
-                    <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
-                        <div className="flex items-center gap-2">
-                            <WrenchScrewdriverIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                            <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
-                                Tools
-                            </span>
-                            <span className="text-xs text-gray-500">({enabledToolCount}/{AVAILABLE_TOOLS.length})</span>
-                        </div>
-                    </div>
-                    <div className="p-2 space-y-1">
-                        {AVAILABLE_TOOLS.map(tool => {
-                            const isEnabled = enabledTools.has(tool.id);
-                            return (
-                                <button
-                                    key={tool.id}
-                                    onClick={() => onToggleTool(tool.id)}
-                                    className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
-                                        isEnabled
-                                            ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
-                                            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
-                                    }`}
-                                >
-                                    {isEnabled ? (
-                                        <CheckIcon className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
-                                    ) : (
-                                        <CheckCircleOutlineIcon className="h-3.5 w-3.5 flex-shrink-0" />
-                                    )}
-                                    <span className="flex-1 text-left">{tool.name}</span>
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
-
-                {/* Memories Section */}
-                <div className="border-b border-gray-200 dark:border-gray-700">
-                    <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <LightBulbIcon className="h-4 w-4 text-yellow-600 dark:text-yellow-400" />
-                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
-                                    Memories
-                                </span>
-                                <span className="text-xs text-gray-500">({totalMemoryCount})</span>
-                            </div>
-                            <button
-                                onClick={onExpandMemories}
-                                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                                title="Expand memories"
-                            >
-                                <ArrowsPointingOutIcon className="h-4 w-4" />
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Quick add note */}
-                    <div className="px-3 py-2 border-b border-gray-200 dark:border-gray-700">
-                        <div className="flex gap-1">
-                            <input
-                                type="text"
-                                value={newMemoryInput}
-                                onChange={(e) => setNewMemoryInput(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleAddMemory()}
-                                placeholder="Quick note..."
-                                className="flex-1 px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                            />
-                            <button
-                                onClick={handleAddMemory}
-                                className="px-2 py-1 text-xs bg-yellow-500 text-white rounded hover:bg-yellow-600"
-                            >
-                                +
-                            </button>
-                        </div>
-                    </div>
-
-                    {/* Pinned + Recent memories */}
-                    <div className="p-2 space-y-1">
-                        {pinnedMemories.length === 0 && recentUnpinnedMemories.length === 0 ? (
-                            <div className="text-center text-gray-400 dark:text-gray-500 text-xs py-3">
-                                No memories yet
-                            </div>
-                        ) : (
-                            <>
-                                {/* Pinned memories */}
-                                {pinnedMemories.map((mem) => {
-                                    const typeInfo = getMemoryTypeInfo(mem.memory_type);
-                                    return (
-                                        <div
-                                            key={mem.memory_id}
-                                            className={`flex items-start gap-2 px-2 py-1.5 rounded ${typeInfo.bg}`}
-                                        >
-                                            <BookmarkIcon className="h-3 w-3 mt-0.5 flex-shrink-0 text-blue-500" />
-                                            <span className="flex-1 text-gray-700 dark:text-gray-300 text-xs leading-relaxed line-clamp-2">
-                                                {mem.content}
-                                            </span>
-                                            <button
-                                                onClick={() => onToggleMemoryPinned(mem.memory_id)}
-                                                className="text-blue-500 hover:text-blue-600 flex-shrink-0"
-                                                title="Unpin"
-                                            >
-                                                <XMarkIcon className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                    );
-                                })}
-
-                                {/* Divider if both pinned and recent exist */}
-                                {pinnedMemories.length > 0 && recentUnpinnedMemories.length > 0 && (
-                                    <div className="text-xs text-gray-400 dark:text-gray-500 px-2 py-1">
-                                        Recent
-                                    </div>
-                                )}
-
-                                {/* Recent unpinned memories */}
-                                {recentUnpinnedMemories.map((mem) => {
-                                    const typeInfo = getMemoryTypeInfo(mem.memory_type);
-                                    const TypeIcon = typeInfo.icon;
-                                    return (
-                                        <div
-                                            key={mem.memory_id}
-                                            className="flex items-start gap-2 px-2 py-1.5 rounded bg-gray-50 dark:bg-gray-800/50"
-                                        >
-                                            <TypeIcon className={`h-3 w-3 mt-0.5 flex-shrink-0 ${typeInfo.color}`} />
-                                            <span className="flex-1 text-gray-700 dark:text-gray-300 text-xs leading-relaxed line-clamp-2">
-                                                {mem.content}
-                                            </span>
-                                            <button
-                                                onClick={() => onToggleMemoryPinned(mem.memory_id)}
-                                                className="text-gray-400 hover:text-blue-500 flex-shrink-0"
-                                                title="Pin"
-                                            >
-                                                <BookmarkIcon className="h-3 w-3" />
-                                            </button>
-                                        </div>
-                                    );
-                                })}
-
-                                {/* Show more indicator */}
-                                {hiddenMemoryCount > 0 && (
-                                    <button
-                                        onClick={onExpandMemories}
-                                        className="w-full text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-1"
-                                    >
-                                        +{hiddenMemoryCount} more...
-                                    </button>
-                                )}
-                            </>
-                        )}
-                    </div>
-                </div>
-
-                {/* Assets Section */}
-                <div className="border-b border-gray-200 dark:border-gray-700">
-                    <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                                <DocumentIcon className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
-                                    Assets
-                                </span>
-                                <span className="text-xs text-gray-500">({assets.length})</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                                {contextAssets.length > 0 && (
-                                    <button
-                                        onClick={onClearAllAssetsFromContext}
-                                        className="p-1 text-gray-400 hover:text-orange-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                                        title="Clear all from context"
-                                    >
-                                        <XCircleIcon className="h-4 w-4" />
-                                    </button>
-                                )}
-                                <button
-                                    onClick={onExpandAssets}
-                                    className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
-                                    title="Expand assets"
-                                >
-                                    <ArrowsPointingOutIcon className="h-4 w-4" />
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="p-2 space-y-1">
-                        {/* Assets in context */}
-                        {contextAssets.length === 0 ? (
-                            <div className="text-center text-gray-400 dark:text-gray-500 text-xs py-2">
-                                No assets in context
-                            </div>
-                        ) : (
-                            <>
-                                <div className="text-xs text-gray-500 dark:text-gray-400 px-2 py-1 font-medium">
-                                    In Context ({contextAssets.length})
-                                </div>
-                                {contextAssets.map((asset) => (
-                                    <div key={asset.asset_id} className="flex items-center gap-2 px-2 py-1.5 rounded bg-orange-50 dark:bg-orange-900/20">
-                                        <span className="flex-1 text-gray-700 dark:text-gray-300 text-xs truncate">{asset.name}</span>
-                                        <button
-                                            onClick={() => onToggleAssetContext(asset.asset_id)}
-                                            className="text-gray-400 hover:text-red-500 flex-shrink-0"
-                                            title="Remove from context"
-                                        >
-                                            <XMarkIcon className="h-3 w-3" />
-                                        </button>
-                                    </div>
-                                ))}
-                            </>
-                        )}
-
-                        {/* Recent available assets (top 5) */}
-                        {recentAvailableAssets.length > 0 && (
-                            <>
-                                <div className="text-xs text-gray-400 dark:text-gray-500 px-2 py-1 mt-2">
-                                    Recent
-                                </div>
-                                {recentAvailableAssets.map((asset) => (
-                                    <button
-                                        key={asset.asset_id}
-                                        onClick={() => onToggleAssetContext(asset.asset_id)}
-                                        className="w-full text-left flex items-center gap-2 px-2 py-1.5 rounded text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
-                                    >
-                                        <PlusIcon className="h-3 w-3" />
-                                        <span className="truncate">{asset.name}</span>
-                                    </button>
-                                ))}
-                                {hiddenAssetCount > 0 && (
-                                    <button
-                                        onClick={onExpandAssets}
-                                        className="w-full text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 py-1"
-                                    >
-                                        +{hiddenAssetCount} more...
-                                    </button>
-                                )}
-                            </>
-                        )}
-                    </div>
                 </div>
             </div>
         </div>
