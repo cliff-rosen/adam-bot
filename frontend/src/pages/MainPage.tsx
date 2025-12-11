@@ -1,19 +1,21 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { PaperAirplaneIcon, WrenchScrewdriverIcon, XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/solid';
+import { PaperAirplaneIcon, WrenchScrewdriverIcon, XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon, Cog6ToothIcon, DocumentIcon, CpuChipIcon } from '@heroicons/react/24/solid';
 import { useGeneralChat } from '../hooks/useGeneralChat';
 import { InteractionType, ToolCall } from '../types/chat';
 import { MarkdownRenderer, JsonRenderer } from '../components/common';
 import { conversationApi, Conversation } from '../lib/api';
 
 const SIDEBAR_WIDTH = 256;
+const CONTEXT_PANEL_WIDTH = 280;
 const MIN_CHAT_WIDTH = 300;
 const MIN_WORKSPACE_WIDTH = 200;
 
 /**
- * Main page with three-panel layout:
+ * Main page with four-panel layout:
  * - Left sidebar: Conversation history (collapsible)
- * - Center: Chat interface for interacting with the AI agent
- * - Right: Collaborative workspace (resizable)
+ * - Center-left: Chat interface for interacting with the AI agent
+ * - Center-right: Collaborative workspace (resizable)
+ * - Right sidebar: Context panel - tools, assets, settings (collapsible)
  */
 export default function MainPage() {
     const {
@@ -31,11 +33,17 @@ export default function MainPage() {
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [isLoadingConversations, setIsLoadingConversations] = useState(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [isContextPanelOpen, setIsContextPanelOpen] = useState(true);
     const [workspaceWidth, setWorkspaceWidth] = useState(400);
     const [isDragging, setIsDragging] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
+
+    // Get the last tool history from messages for the context panel
+    const lastToolHistory = messages
+        .filter(m => m.role === 'assistant' && m.custom_payload?.type === 'tool_history')
+        .slice(-1)[0]?.custom_payload?.data as ToolCall[] | undefined;
 
     // Handle divider drag
     const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -50,8 +58,10 @@ export default function MainPage() {
             if (!containerRef.current) return;
             const containerRect = containerRef.current.getBoundingClientRect();
             const sidebarW = isSidebarOpen ? SIDEBAR_WIDTH : 0;
-            const newWorkspaceWidth = containerRect.right - e.clientX;
-            const availableWidth = containerRect.width - sidebarW;
+            const contextPanelW = isContextPanelOpen ? CONTEXT_PANEL_WIDTH : 0;
+            // Calculate workspace width: distance from mouse to where context panel starts
+            const newWorkspaceWidth = containerRect.right - contextPanelW - 6 - e.clientX; // 6px for toggle button
+            const availableWidth = containerRect.width - sidebarW - 6 - contextPanelW - 6; // account for both toggle buttons
 
             // Clamp workspace width
             const clampedWidth = Math.max(
@@ -72,7 +82,7 @@ export default function MainPage() {
             document.removeEventListener('mousemove', handleMouseMove);
             document.removeEventListener('mouseup', handleMouseUp);
         };
-    }, [isDragging, isSidebarOpen]);
+    }, [isDragging, isSidebarOpen, isContextPanelOpen]);
 
     // Load conversation list
     useEffect(() => {
@@ -526,6 +536,99 @@ export default function MainPage() {
                             </div>
                         </div>
                     )}
+                </div>
+            </div>
+
+            {/* Context Panel Toggle Button */}
+            <button
+                onClick={() => setIsContextPanelOpen(!isContextPanelOpen)}
+                className="flex-shrink-0 w-6 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 border-l border-gray-200 dark:border-gray-700 transition-colors"
+                title={isContextPanelOpen ? 'Hide context' : 'Show context'}
+            >
+                {isContextPanelOpen ? (
+                    <ChevronRightIcon className="h-4 w-4 text-gray-500" />
+                ) : (
+                    <ChevronLeftIcon className="h-4 w-4 text-gray-500" />
+                )}
+            </button>
+
+            {/* Right Sidebar - Context Panel (Collapsible) */}
+            <div
+                className={`flex flex-col border-l border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 transition-all duration-300 ${
+                    isContextPanelOpen ? 'w-[280px]' : 'w-0'
+                } overflow-hidden`}
+            >
+                {/* Context Panel Header */}
+                <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 dark:border-gray-700 min-w-[280px]">
+                    <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+                        Context
+                    </h2>
+                    <Cog6ToothIcon className="h-5 w-5 text-gray-400" />
+                </div>
+
+                {/* Context Panel Content */}
+                <div className="flex-1 overflow-y-auto min-w-[280px]">
+                    {/* Active Tools Section */}
+                    <div className="border-b border-gray-200 dark:border-gray-700">
+                        <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
+                            <div className="flex items-center gap-2">
+                                <WrenchScrewdriverIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                                    Available Tools
+                                </span>
+                            </div>
+                        </div>
+                        <div className="p-3 space-y-1">
+                            <div className="flex items-center gap-2 px-2 py-1.5 rounded text-sm text-gray-700 dark:text-gray-300">
+                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                web_search
+                            </div>
+                            <div className="flex items-center gap-2 px-2 py-1.5 rounded text-sm text-gray-700 dark:text-gray-300">
+                                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                fetch_webpage
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Recent Tool Calls Section */}
+                    {lastToolHistory && lastToolHistory.length > 0 && (
+                        <div className="border-b border-gray-200 dark:border-gray-700">
+                            <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
+                                <div className="flex items-center gap-2">
+                                    <CpuChipIcon className="h-4 w-4 text-purple-600 dark:text-purple-400" />
+                                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                                        Recent Tool Calls
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="p-3 space-y-2">
+                                {lastToolHistory.slice(0, 5).map((tool, idx) => (
+                                    <button
+                                        key={idx}
+                                        onClick={() => setSelectedToolHistory(lastToolHistory)}
+                                        className="w-full text-left px-2 py-1.5 rounded text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-800 truncate"
+                                    >
+                                        {tool.tool_name}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Assets Section (Placeholder) */}
+                    <div className="border-b border-gray-200 dark:border-gray-700">
+                        <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
+                            <div className="flex items-center gap-2">
+                                <DocumentIcon className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                                    Assets in Context
+                                </span>
+                            </div>
+                        </div>
+                        <div className="p-4 text-center text-gray-400 dark:text-gray-500 text-sm">
+                            No assets loaded
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
