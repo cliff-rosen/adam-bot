@@ -12,7 +12,6 @@ interface ContextPanelProps {
     memories: Memory[];
     assets: Asset[];
     lastToolHistory: ToolCall[] | undefined;
-    conversationId: number | null;
     onAddWorkingMemory: (content: string) => void;
     onToggleMemoryPinned: (memId: number) => void;
     onDeleteMemory: (memId: number) => void;
@@ -42,7 +41,6 @@ export default function ContextPanel({
     memories,
     assets,
     lastToolHistory,
-    conversationId,
     onAddWorkingMemory,
     onToggleMemoryPinned,
     onDeleteMemory,

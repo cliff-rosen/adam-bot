@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect } from 'react';
 import { PaperAirplaneIcon, WrenchScrewdriverIcon } from '@heroicons/react/24/solid';
 import { MarkdownRenderer } from '../common';
-import { ChatMessage, ToolCall } from '../../types/chat';
+import { GeneralChatMessage, ToolCall, SuggestedValue, SuggestedAction } from '../../types/chat';
 
 interface ChatPanelProps {
-    messages: ChatMessage[];
+    messages: GeneralChatMessage[];
     conversationId: number | null;
     isLoading: boolean;
     streamingText: string;
@@ -133,7 +133,7 @@ export default function ChatPanel({
                         {/* Suggested Values */}
                         {message.suggested_values && message.suggested_values.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-3 ml-2">
-                                {message.suggested_values.map((suggestion, sIdx) => (
+                                {message.suggested_values.map((suggestion: SuggestedValue, sIdx: number) => (
                                     <button
                                         key={sIdx}
                                         onClick={() => onValueSelect(suggestion.value)}
@@ -149,7 +149,7 @@ export default function ChatPanel({
                         {/* Suggested Actions */}
                         {message.suggested_actions && message.suggested_actions.length > 0 && (
                             <div className="flex flex-wrap gap-2 mt-3 ml-2">
-                                {message.suggested_actions.map((action, aIdx) => (
+                                {message.suggested_actions.map((action: SuggestedAction, aIdx: number) => (
                                     <button
                                         key={aIdx}
                                         onClick={() => onActionClick(action)}

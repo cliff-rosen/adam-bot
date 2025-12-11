@@ -311,7 +311,6 @@ export default function MainPage() {
                     memories={memories}
                     assets={assets}
                     lastToolHistory={lastToolHistory}
-                    conversationId={conversationId}
                     onAddWorkingMemory={handleAddWorkingMemory}
                     onToggleMemoryPinned={handleToggleMemoryPinned}
                     onDeleteMemory={handleDeleteMemory}

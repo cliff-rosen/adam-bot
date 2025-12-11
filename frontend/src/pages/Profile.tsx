@@ -8,8 +8,7 @@ export default function Profile() {
 
     // Form state
     const [userForm, setUserForm] = useState({
-        full_name: user?.full_name || '',
-        display_name: userProfile?.display_name || '',
+        display_name: userProfile?.display_name || user?.username || '',
         bio: userProfile?.bio || ''
     });
 
@@ -75,19 +74,6 @@ export default function Profile() {
                             <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                                 Email cannot be changed after registration
                             </p>
-                        </div>
-
-                        <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                Full Name
-                            </label>
-                            <input
-                                type="text"
-                                placeholder="Enter your full name"
-                                value={userForm.full_name}
-                                onChange={(e) => setUserForm({ ...userForm, full_name: e.target.value })}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                            />
                         </div>
 
                         <div>
