@@ -1,20 +1,95 @@
 import { useState, useRef, useEffect } from 'react';
-import { PaperAirplaneIcon, WrenchScrewdriverIcon, XMarkIcon } from '@heroicons/react/24/solid';
+import { PaperAirplaneIcon, WrenchScrewdriverIcon, XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, TrashIcon } from '@heroicons/react/24/solid';
 import { useGeneralChat } from '../hooks/useGeneralChat';
 import { InteractionType, ToolCall } from '../types/chat';
 import { MarkdownRenderer, JsonRenderer } from '../components/common';
+import { conversationApi, Conversation } from '../lib/api';
 
 /**
- * Main page with two-panel layout:
- * - Left: Chat interface for interacting with the AI agent
+ * Main page with three-panel layout:
+ * - Left sidebar: Conversation history
+ * - Center: Chat interface for interacting with the AI agent
  * - Right: Collaborative workspace (content TBD)
  */
 export default function MainPage() {
-    const { messages, sendMessage, isLoading, streamingText, statusText } = useGeneralChat({});
+    const {
+        messages,
+        sendMessage,
+        isLoading,
+        streamingText,
+        statusText,
+        conversationId,
+        newConversation,
+        loadConversation
+    } = useGeneralChat({});
     const [input, setInput] = useState('');
     const [selectedToolHistory, setSelectedToolHistory] = useState<ToolCall[] | null>(null);
+    const [conversations, setConversations] = useState<Conversation[]>([]);
+    const [isLoadingConversations, setIsLoadingConversations] = useState(true);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+
+    // Load conversation list
+    useEffect(() => {
+        const loadConversations = async () => {
+            try {
+                const convs = await conversationApi.list(50);
+                setConversations(convs);
+            } catch (err) {
+                console.error('Failed to load conversations:', err);
+            } finally {
+                setIsLoadingConversations(false);
+            }
+        };
+        loadConversations();
+    }, []);
+
+    // Refresh conversation list when conversationId changes (new conversation created)
+    useEffect(() => {
+        if (conversationId) {
+            const refreshConversations = async () => {
+                try {
+                    const convs = await conversationApi.list(50);
+                    setConversations(convs);
+                } catch (err) {
+                    console.error('Failed to refresh conversations:', err);
+                }
+            };
+            refreshConversations();
+        }
+    }, [conversationId]);
+
+    const handleNewConversation = async () => {
+        try {
+            await newConversation();
+        } catch (err) {
+            console.error('Failed to create new conversation:', err);
+        }
+    };
+
+    const handleSelectConversation = async (convId: number) => {
+        if (convId === conversationId) return;
+        try {
+            await loadConversation(convId);
+            setSelectedToolHistory(null);
+        } catch (err) {
+            console.error('Failed to load conversation:', err);
+        }
+    };
+
+    const handleDeleteConversation = async (convId: number, e: React.MouseEvent) => {
+        e.stopPropagation();
+        if (!confirm('Delete this conversation?')) return;
+        try {
+            await conversationApi.delete(convId);
+            setConversations(prev => prev.filter(c => c.conversation_id !== convId));
+            if (convId === conversationId) {
+                await newConversation();
+            }
+        } catch (err) {
+            console.error('Failed to delete conversation:', err);
+        }
+    };
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -75,8 +150,69 @@ export default function MainPage() {
 
     return (
         <div className="flex h-full">
-            {/* Left Panel - Chat */}
-            <div className="w-1/2 flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+            {/* Left Sidebar - Conversation List */}
+            <div className="w-64 flex flex-col border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+                {/* Sidebar Header */}
+                <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 dark:border-gray-700">
+                    <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+                        Conversations
+                    </h2>
+                    <button
+                        onClick={handleNewConversation}
+                        className="p-1.5 text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                        title="New conversation"
+                    >
+                        <PlusIcon className="h-5 w-5" />
+                    </button>
+                </div>
+
+                {/* Conversation List */}
+                <div className="flex-1 overflow-y-auto">
+                    {isLoadingConversations ? (
+                        <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+                            Loading...
+                        </div>
+                    ) : conversations.length === 0 ? (
+                        <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+                            No conversations yet
+                        </div>
+                    ) : (
+                        <div className="py-2">
+                            {conversations.map((conv) => (
+                                <div
+                                    key={conv.conversation_id}
+                                    onClick={() => handleSelectConversation(conv.conversation_id)}
+                                    className={`group flex items-center gap-2 px-4 py-2.5 cursor-pointer hover:bg-gray-200 dark:hover:bg-gray-800 ${
+                                        conv.conversation_id === conversationId
+                                            ? 'bg-gray-200 dark:bg-gray-800'
+                                            : ''
+                                    }`}
+                                >
+                                    <ChatBubbleLeftRightIcon className="h-4 w-4 text-gray-400 flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm text-gray-900 dark:text-white truncate">
+                                            {conv.title || 'New conversation'}
+                                        </p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                            {new Date(conv.updated_at).toLocaleDateString()}
+                                        </p>
+                                    </div>
+                                    <button
+                                        onClick={(e) => handleDeleteConversation(conv.conversation_id, e)}
+                                        className="p-1 text-gray-400 hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        title="Delete conversation"
+                                    >
+                                        <TrashIcon className="h-4 w-4" />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+
+            {/* Center Panel - Chat */}
+            <div className="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
                 {/* Chat Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
                     <div>
@@ -84,7 +220,7 @@ export default function MainPage() {
                             Agent Chat
                         </h2>
                         <p className="text-sm text-gray-500 dark:text-gray-400">
-                            Your personal AI assistant
+                            {conversationId ? `Conversation #${conversationId}` : 'New conversation'}
                         </p>
                     </div>
                 </div>
@@ -248,7 +384,7 @@ export default function MainPage() {
             </div>
 
             {/* Right Panel - Workspace */}
-            <div className="w-1/2 flex flex-col bg-gray-50 dark:bg-gray-950">
+            <div className="w-[400px] flex-shrink-0 flex flex-col bg-gray-50 dark:bg-gray-950">
                 {/* Workspace Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
                     <div>
