@@ -18,6 +18,7 @@ from services.chat_payloads import (
     get_tools_for_anthropic,
     ToolResult
 )
+from services.conversation_service import ConversationService
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,28 @@ class GeneralChatService:
         try:
             system_prompt = self._build_system_prompt(request.context)
             user_prompt = request.message
+
+            # Handle conversation persistence
+            conv_service = ConversationService(self.db, self.user_id)
+            if request.conversation_id:
+                conversation = conv_service.get_conversation(request.conversation_id)
+                if not conversation:
+                    # Invalid conversation_id, create new one
+                    conversation = conv_service.create_conversation()
+            else:
+                conversation = conv_service.get_or_create_active_conversation()
+
+            conversation_id = conversation.conversation_id
+
+            # Save user message
+            conv_service.add_message(
+                conversation_id=conversation_id,
+                role="user",
+                content=user_prompt
+            )
+
+            # Auto-title if this is the first message
+            conv_service.auto_title_if_needed(conversation_id)
 
             # Build message history
             messages = [
@@ -186,10 +209,19 @@ class GeneralChatService:
                 )
                 yield separator_response.model_dump_json()
 
+            # Save assistant message
+            conv_service.add_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=collected_text,
+                tool_calls=tool_call_history if tool_call_history else None
+            )
+
             # Build final payload
             logger.info(f"Building final payload with collected_text length: {len(collected_text)}, tool_calls: {len(tool_call_history)}")
             final_payload = ChatResponsePayload(
                 message=collected_text,
+                conversation_id=conversation_id,
                 suggested_values=None,
                 suggested_actions=None,
                 custom_payload={"type": "tool_history", "data": tool_call_history} if tool_call_history else None

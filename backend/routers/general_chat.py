@@ -31,6 +31,7 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 class ChatRequest(BaseModel):
     """Request model for general chat endpoint"""
     message: str
+    conversation_id: Optional[int] = None  # If None, creates new conversation
     context: Dict[str, Any]
     interaction_type: Literal["text_input", "value_selected", "action_executed"]
     action_metadata: Optional[ActionMetadata] = None

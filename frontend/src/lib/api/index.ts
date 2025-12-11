@@ -92,3 +92,7 @@ export const formatTimestamp = (timestamp: string): string => {
   const date = new Date(timestamp);
   return date.toLocaleString();
 };
+
+// Re-export API clients
+export { conversationApi } from './conversationApi';
+export type { Conversation, ConversationWithMessages, Message } from './conversationApi';

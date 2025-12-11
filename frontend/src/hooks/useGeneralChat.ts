@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { generalChatApi } from '../lib/api/generalChatApi';
+import { conversationApi } from '../lib/api/conversationApi';
 import {
     GeneralChatMessage,
     InteractionType,
@@ -13,6 +14,37 @@ export function useGeneralChat(initialContext?: Record<string, any>) {
     const [error, setError] = useState<string | null>(null);
     const [streamingText, setStreamingText] = useState('');
     const [statusText, setStatusText] = useState<string | null>(null);
+    const [conversationId, setConversationId] = useState<number | null>(null);
+    const [isLoadingConversation, setIsLoadingConversation] = useState(true);
+
+    // Load current conversation on mount
+    useEffect(() => {
+        const loadConversation = async () => {
+            try {
+                const conversation = await conversationApi.getCurrent();
+                setConversationId(conversation.conversation_id);
+
+                // Load existing messages
+                if (conversation.messages && conversation.messages.length > 0) {
+                    const loadedMessages: GeneralChatMessage[] = conversation.messages.map(msg => ({
+                        role: msg.role,
+                        content: msg.content,
+                        timestamp: msg.created_at,
+                        suggested_values: msg.suggested_values,
+                        suggested_actions: msg.suggested_actions,
+                        custom_payload: msg.custom_payload
+                    }));
+                    setMessages(loadedMessages);
+                }
+            } catch (err) {
+                console.error('Failed to load conversation:', err);
+            } finally {
+                setIsLoadingConversation(false);
+            }
+        };
+
+        loadConversation();
+    }, []);
 
     const sendMessage = useCallback(async (
         content: string,
@@ -43,6 +75,7 @@ export function useGeneralChat(initialContext?: Record<string, any>) {
 
             for await (const chunk of generalChatApi.streamMessage({
                 message: content,
+                conversation_id: conversationId ?? undefined,
                 context,
                 interaction_type: interactionType,
                 action_metadata: actionMetadata,
@@ -72,6 +105,11 @@ export function useGeneralChat(initialContext?: Record<string, any>) {
 
                 // Handle final payload
                 if (chunk.payload && chunk.status === 'complete') {
+                    // Update conversation ID if returned
+                    if (chunk.payload.conversation_id) {
+                        setConversationId(chunk.payload.conversation_id);
+                    }
+
                     const assistantMessage: GeneralChatMessage = {
                         role: 'assistant',
                         content: chunk.payload.message,
@@ -104,7 +142,7 @@ export function useGeneralChat(initialContext?: Record<string, any>) {
         } finally {
             setIsLoading(false);
         }
-    }, [context, messages]);
+    }, [context, messages, conversationId]);
 
     const updateContext = useCallback((updates: Record<string, any>) => {
         setContext(prev => ({ ...prev, ...updates }));
@@ -114,7 +152,50 @@ export function useGeneralChat(initialContext?: Record<string, any>) {
         setMessages([]);
         setContext(initialContext || {});
         setError(null);
+        setConversationId(null);
     }, [initialContext]);
+
+    const newConversation = useCallback(async () => {
+        try {
+            const conversation = await conversationApi.create();
+            setConversationId(conversation.conversation_id);
+            setMessages([]);
+            setContext(initialContext || {});
+            setError(null);
+            return conversation.conversation_id;
+        } catch (err) {
+            console.error('Failed to create conversation:', err);
+            throw err;
+        }
+    }, [initialContext]);
+
+    const loadConversation = useCallback(async (id: number) => {
+        try {
+            setIsLoadingConversation(true);
+            const conversation = await conversationApi.get(id);
+            setConversationId(conversation.conversation_id);
+
+            if (conversation.messages && conversation.messages.length > 0) {
+                const loadedMessages: GeneralChatMessage[] = conversation.messages.map(msg => ({
+                    role: msg.role,
+                    content: msg.content,
+                    timestamp: msg.created_at,
+                    suggested_values: msg.suggested_values,
+                    suggested_actions: msg.suggested_actions,
+                    custom_payload: msg.custom_payload
+                }));
+                setMessages(loadedMessages);
+            } else {
+                setMessages([]);
+            }
+            setError(null);
+        } catch (err) {
+            console.error('Failed to load conversation:', err);
+            throw err;
+        } finally {
+            setIsLoadingConversation(false);
+        }
+    }, []);
 
     return {
         messages,
@@ -123,8 +204,12 @@ export function useGeneralChat(initialContext?: Record<string, any>) {
         error,
         streamingText,
         statusText,
+        conversationId,
+        isLoadingConversation,
         sendMessage,
         updateContext,
-        reset
+        reset,
+        newConversation,
+        loadConversation
     };
 }

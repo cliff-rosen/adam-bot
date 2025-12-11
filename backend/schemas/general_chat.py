@@ -56,6 +56,7 @@ class ActionMetadata(BaseModel):
 class ChatResponsePayload(BaseModel):
     """Structured payload for final chat responses"""
     message: str
+    conversation_id: Optional[int] = None  # The conversation this message belongs to
     suggested_values: Optional[List[SuggestedValue]] = None
     suggested_actions: Optional[List[SuggestedAction]] = None
     custom_payload: Optional[CustomPayload] = None

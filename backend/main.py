@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, llm, search, web_retrieval, general_chat
+from routers import auth, llm, search, web_retrieval, general_chat, conversations
 from database import init_db
 from config import settings, setup_logging
 from middleware import LoggingMiddleware
@@ -51,6 +51,7 @@ app.include_router(llm.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(web_retrieval.router, prefix="/api")
 app.include_router(general_chat.router)
+app.include_router(conversations.router)
 
 logger.info("Routers included")
 

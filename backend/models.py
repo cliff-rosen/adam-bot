@@ -2,7 +2,7 @@
 CMR-Bot Database Models
 
 Simplified models for the personal AI agent system.
-Core entities: Users, Profiles
+Core entities: Users, Profiles, Conversations, Messages
 """
 
 from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Boolean, JSON, Enum
@@ -60,3 +60,43 @@ class UserProfile(Base):
 
     # Relationships
     user = relationship("User", back_populates="profile")
+
+
+class Conversation(Base):
+    """Chat conversation container"""
+    __tablename__ = "conversations"
+
+    conversation_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    title = Column(String(255), nullable=True)  # Auto-generated or user-set
+    is_archived = Column(Boolean, default=False)
+    extra_data = Column(JSON, default=dict)  # Flexible storage for future needs
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User")
+    messages = relationship("Message", back_populates="conversation", cascade="all, delete-orphan")
+
+
+class Message(Base):
+    """Individual chat message"""
+    __tablename__ = "messages"
+
+    message_id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.conversation_id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # 'user' or 'assistant'
+    content = Column(Text, nullable=False)
+
+    # Tool usage tracking
+    tool_calls = Column(JSON, nullable=True)  # Array of {tool_name, input, output}
+
+    # Rich response data (for assistant messages)
+    suggested_values = Column(JSON, nullable=True)
+    suggested_actions = Column(JSON, nullable=True)
+    custom_payload = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    conversation = relationship("Conversation", back_populates="messages")

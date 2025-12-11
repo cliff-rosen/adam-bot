@@ -7,6 +7,7 @@ import { InteractionType, ActionMetadata, SuggestedValue, SuggestedAction, Custo
 
 export interface GeneralChatRequest {
     message: string;
+    conversation_id?: number;  // If provided, continues existing conversation
     context: Record<string, any>;
     interaction_type: InteractionType;
     action_metadata?: ActionMetadata;
@@ -19,6 +20,7 @@ export interface GeneralChatRequest {
 
 export interface ChatResponsePayload {
     message: string;
+    conversation_id?: number;  // The conversation this message belongs to
     suggested_values?: SuggestedValue[];
     suggested_actions?: SuggestedAction[];
     custom_payload?: CustomPayload;
