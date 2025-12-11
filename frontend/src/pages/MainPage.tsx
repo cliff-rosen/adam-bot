@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '@heroicons/react/24/solid';
 import { useGeneralChat } from '../hooks/useGeneralChat';
+import { useProfile } from '../context/ProfileContext';
 import { InteractionType, ToolCall, GeneralChatMessage, WorkspacePayload } from '../types/chat';
-import { memoryApi, Memory, assetApi, Asset } from '../lib/api';
+import { memoryApi, Memory, assetApi, Asset, profileApi } from '../lib/api';
 import {
     ConversationSidebar,
     ChatPanel,
@@ -25,6 +27,9 @@ const MIN_WORKSPACE_WIDTH = 200;
  * - Right sidebar: Context panel - tools, assets, settings (collapsible)
  */
 export default function MainPage() {
+    const navigate = useNavigate();
+    const { userProfile, setUserProfile } = useProfile();
+
     // Agent control state (defined first as hook depends on it)
     const [enabledTools, setEnabledTools] = useState<Set<string>>(
         new Set(['web_search', 'fetch_webpage', 'save_memory', 'search_memory'])
@@ -106,22 +111,24 @@ export default function MainPage() {
         };
     }, [isDragging, isSidebarOpen, isContextPanelOpen]);
 
-    // Load memories and assets on mount
+    // Load memories, assets, and profile on mount
     useEffect(() => {
-        const loadMemoriesAndAssets = async () => {
+        const loadData = async () => {
             try {
-                const [mems, assts] = await Promise.all([
+                const [mems, assts, prof] = await Promise.all([
                     memoryApi.list(),
-                    assetApi.list()
+                    assetApi.list(),
+                    profileApi.get()
                 ]);
                 setMemories(mems);
                 setAssets(assts);
+                setUserProfile(prof);
             } catch (err) {
-                console.error('Failed to load memories/assets:', err);
+                console.error('Failed to load data:', err);
             }
         };
-        loadMemoriesAndAssets();
-    }, []);
+        loadData();
+    }, [setUserProfile]);
 
     // Conversation handlers
     const handleNewConversation = async () => {
@@ -267,6 +274,10 @@ export default function MainPage() {
 
     const handleToggleProfile = () => {
         setIncludeProfile(prev => !prev);
+    };
+
+    const handleEditProfile = () => {
+        navigate('/profile');
     };
 
     const handleSaveMessageAsAsset = async (message: GeneralChatMessage) => {
@@ -446,6 +457,7 @@ export default function MainPage() {
                 <ContextPanel
                     memories={memories}
                     assets={assets}
+                    profile={userProfile}
                     enabledTools={enabledTools}
                     includeProfile={includeProfile}
                     onAddWorkingMemory={handleAddWorkingMemory}
@@ -456,6 +468,7 @@ export default function MainPage() {
                     onToggleProfile={handleToggleProfile}
                     onExpandMemories={() => setIsMemoryModalOpen(true)}
                     onExpandAssets={() => setIsAssetModalOpen(true)}
+                    onEditProfile={handleEditProfile}
                 />
             </div>
 

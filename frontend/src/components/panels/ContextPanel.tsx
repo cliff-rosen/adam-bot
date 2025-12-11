@@ -3,10 +3,11 @@ import {
     WrenchScrewdriverIcon, XMarkIcon, PlusIcon, DocumentIcon,
     LightBulbIcon, BookmarkIcon, Cog6ToothIcon,
     ArrowsPointingOutIcon, UserIcon, HeartIcon, BuildingOfficeIcon,
-    FolderIcon, ClockIcon, XCircleIcon, CheckIcon, UserCircleIcon
+    FolderIcon, ClockIcon, XCircleIcon, CheckIcon, UserCircleIcon,
+    ChevronDownIcon, ChevronRightIcon, PencilIcon
 } from '@heroicons/react/24/solid';
 import { CheckCircleIcon as CheckCircleOutlineIcon } from '@heroicons/react/24/outline';
-import { Memory, MemoryType, Asset } from '../../lib/api';
+import { Memory, MemoryType, Asset, Profile } from '../../lib/api';
 
 // Available tools that can be enabled/disabled
 const AVAILABLE_TOOLS = [
@@ -19,6 +20,7 @@ const AVAILABLE_TOOLS = [
 interface ContextPanelProps {
     memories: Memory[];
     assets: Asset[];
+    profile: Profile | null;
     enabledTools: Set<string>;
     includeProfile: boolean;
     onAddWorkingMemory: (content: string) => void;
@@ -29,6 +31,7 @@ interface ContextPanelProps {
     onToggleProfile: () => void;
     onExpandMemories: () => void;
     onExpandAssets: () => void;
+    onEditProfile: () => void;
 }
 
 // Helper to get memory type icon and color
@@ -52,6 +55,7 @@ const getMemoryTypeInfo = (type: MemoryType) => {
 export default function ContextPanel({
     memories,
     assets,
+    profile,
     enabledTools,
     includeProfile,
     onAddWorkingMemory,
@@ -61,9 +65,11 @@ export default function ContextPanel({
     onToggleTool,
     onToggleProfile,
     onExpandMemories,
-    onExpandAssets
+    onExpandAssets,
+    onEditProfile
 }: ContextPanelProps) {
     const [newMemoryInput, setNewMemoryInput] = useState('');
+    const [isProfileExpanded, setIsProfileExpanded] = useState(false);
 
     // Memories: pinned + last 3 unpinned
     const pinnedMemories = memories.filter(m => m.is_pinned && m.is_active);
@@ -105,22 +111,90 @@ export default function ContextPanel({
             <div className="flex-1 overflow-y-auto min-w-[280px]">
                 {/* Profile Section */}
                 <div className="border-b border-gray-200 dark:border-gray-700">
-                    <button
-                        onClick={onToggleProfile}
-                        className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors"
-                    >
-                        <div className="flex items-center gap-2">
-                            <UserCircleIcon className={`h-4 w-4 ${includeProfile ? 'text-green-500' : 'text-gray-400'}`} />
-                            <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
-                                Profile Info
-                            </span>
+                    <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
+                        <div className="flex items-center justify-between">
+                            <button
+                                onClick={() => setIsProfileExpanded(!isProfileExpanded)}
+                                className="flex items-center gap-2"
+                            >
+                                {isProfileExpanded ? (
+                                    <ChevronDownIcon className="h-3 w-3 text-gray-500" />
+                                ) : (
+                                    <ChevronRightIcon className="h-3 w-3 text-gray-500" />
+                                )}
+                                <UserCircleIcon className={`h-4 w-4 ${includeProfile ? 'text-green-500' : 'text-gray-400'}`} />
+                                <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                                    Profile
+                                </span>
+                            </button>
+                            <div className="flex items-center gap-1">
+                                <button
+                                    onClick={onEditProfile}
+                                    className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                                    title="Edit profile"
+                                >
+                                    <PencilIcon className="h-3.5 w-3.5" />
+                                </button>
+                                <button
+                                    onClick={onToggleProfile}
+                                    className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                                    title={includeProfile ? 'Exclude from context' : 'Include in context'}
+                                >
+                                    {includeProfile ? (
+                                        <CheckIcon className="h-4 w-4 text-green-500" />
+                                    ) : (
+                                        <CheckCircleOutlineIcon className="h-4 w-4 text-gray-400" />
+                                    )}
+                                </button>
+                            </div>
                         </div>
-                        {includeProfile ? (
-                            <CheckIcon className="h-4 w-4 text-green-500" />
-                        ) : (
-                            <CheckCircleOutlineIcon className="h-4 w-4 text-gray-400" />
-                        )}
-                    </button>
+                    </div>
+                    {isProfileExpanded && (
+                        <div className="p-3 space-y-2">
+                            {profile ? (
+                                <>
+                                    {profile.full_name && (
+                                        <div className="text-xs">
+                                            <span className="text-gray-500 dark:text-gray-400">Name: </span>
+                                            <span className="text-gray-700 dark:text-gray-300">{profile.full_name}</span>
+                                        </div>
+                                    )}
+                                    {profile.display_name && (
+                                        <div className="text-xs">
+                                            <span className="text-gray-500 dark:text-gray-400">Display: </span>
+                                            <span className="text-gray-700 dark:text-gray-300">{profile.display_name}</span>
+                                        </div>
+                                    )}
+                                    {profile.bio && (
+                                        <div className="text-xs">
+                                            <span className="text-gray-500 dark:text-gray-400">Bio: </span>
+                                            <span className="text-gray-700 dark:text-gray-300">{profile.bio}</span>
+                                        </div>
+                                    )}
+                                    {profile.preferences && Object.keys(profile.preferences).length > 0 && (
+                                        <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                            <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Preferences:</div>
+                                            {Object.entries(profile.preferences).map(([key, value]) => (
+                                                <div key={key} className="text-xs">
+                                                    <span className="text-gray-500 dark:text-gray-400">{key}: </span>
+                                                    <span className="text-gray-700 dark:text-gray-300">{String(value)}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {!profile.full_name && !profile.display_name && !profile.bio && Object.keys(profile.preferences || {}).length === 0 && (
+                                        <div className="text-xs text-gray-400 dark:text-gray-500 italic">
+                                            No profile info set. Click edit to add.
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <div className="text-xs text-gray-400 dark:text-gray-500">
+                                    Loading profile...
+                                </div>
+                            )}
+                        </div>
+                    )}
                 </div>
 
                 {/* Tools Section */}

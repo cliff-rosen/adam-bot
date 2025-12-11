@@ -4,7 +4,7 @@ General Chat Service for CMR Bot
 Handles the primary agent's chat interactions with tool support.
 """
 
-from typing import Dict, Any, AsyncGenerator, List, Optional
+from typing import Dict, Any, AsyncGenerator, List, Optional, Tuple
 from sqlalchemy.orm import Session
 import anthropic
 import asyncio
@@ -15,12 +15,12 @@ from schemas.general_chat import ChatResponsePayload
 from services.chat_payloads import (
     get_tool,
     get_all_tools,
-    get_tools_for_anthropic,
     ToolResult
 )
 from services.conversation_service import ConversationService
 from services.memory_service import MemoryService
 from services.asset_service import AssetService
+from services.profile_service import ProfileService
 
 logger = logging.getLogger(__name__)
 
@@ -38,320 +38,156 @@ class GeneralChatService:
         self.client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
         self.async_client = anthropic.AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
-    async def stream_chat_message(self, request) -> AsyncGenerator[str, None]:
+    # =========================================================================
+    # Tool Configuration Helpers
+    # =========================================================================
+
+    def _get_filtered_tools(self, enabled_tools: Optional[List[str]] = None) -> List[Any]:
         """
-        Stream a chat message response with tool support via SSE.
-        """
-        from routers.general_chat import ChatStreamChunk, ChatStatusResponse
-
-        try:
-            user_prompt = request.message
-
-            # Handle conversation persistence
-            conv_service = ConversationService(self.db, self.user_id)
-
-            if request.conversation_id:
-                # Continue existing conversation
-                conversation = conv_service.get_conversation(request.conversation_id)
-                if not conversation:
-                    raise ValueError(f"Conversation {request.conversation_id} not found")
-                conversation_id = conversation.conversation_id
-            else:
-                # Create new conversation
-                conversation = conv_service.create_conversation()
-                conversation_id = conversation.conversation_id
-
-            # Save user message first
-            conv_service.add_message(
-                conversation_id=conversation_id,
-                role="user",
-                content=user_prompt
-            )
-
-            # Auto-title if this is the first message
-            conv_service.auto_title_if_needed(conversation_id)
-
-            # Load message history from database (excludes the message we just added since it's already there)
-            db_messages = conv_service.get_messages(conversation_id)
-            messages = [
-                {"role": msg.role, "content": msg.content}
-                for msg in db_messages
-            ]
-
-            # Build system prompt with semantic memory search based on user's message
-            system_prompt = self._build_system_prompt(
-                request.context,
-                user_message=user_prompt,
-                enabled_tools=request.enabled_tools,
-                include_profile=request.include_profile
-            )
-
-            # Build tool context (passed to tool executors)
-            tool_context = {
-                **(request.context or {}),
-                "conversation_id": conversation_id
-            }
-
-            # Get tools, filtered by enabled_tools if specified
-            all_tools = get_all_tools()
-            if request.enabled_tools is not None:
-                # Filter to only enabled tools
-                enabled_set = set(request.enabled_tools)
-                tools = [t for t in all_tools if t.name in enabled_set]
-            else:
-                tools = all_tools
-
-            tools_by_name = {tool.name: tool for tool in tools}
-
-            # Build anthropic tools list from filtered tools
-            anthropic_tools = [
-                {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "input_schema": tool.input_schema
-                }
-                for tool in tools
-            ] if tools else None
-
-            # Send initial status
-            status_response = ChatStatusResponse(
-                status="Thinking...",
-                payload=None,
-                error=None,
-                debug=None
-            )
-            yield status_response.model_dump_json()
-
-            iteration = 0
-            collected_text = ""
-            tool_call_history = []  # Track all tool calls with inputs and outputs
-
-            # Build API call kwargs - only include tools if we have them
-            api_kwargs = {
-                "model": CHAT_MODEL,
-                "max_tokens": CHAT_MAX_TOKENS,
-                "temperature": 0.7,
-                "system": system_prompt,
-                "messages": messages
-            }
-            if anthropic_tools:
-                api_kwargs["tools"] = anthropic_tools
-
-            while iteration < MAX_TOOL_ITERATIONS:
-                iteration += 1
-                logger.info(f"Loop iteration {iteration}")
-
-                # Always stream - collect response and check for tool use
-                response_content = []
-                current_text = ""
-
-                async with self.async_client.messages.stream(**api_kwargs) as stream:
-                    async for event in stream:
-                        # Handle text streaming
-                        if hasattr(event, 'type'):
-                            if event.type == 'content_block_delta' and hasattr(event, 'delta'):
-                                if hasattr(event.delta, 'text'):
-                                    text = event.delta.text
-                                    current_text += text
-                                    collected_text += text
-                                    token_response = ChatStreamChunk(
-                                        token=text,
-                                        response_text=None,
-                                        payload=None,
-                                        status="streaming",
-                                        error=None,
-                                        debug=None
-                                    )
-                                    yield token_response.model_dump_json()
-
-                    # Get the final response to check for tool use
-                    final_response = await stream.get_final_message()
-                    response_content = final_response.content
-
-                # Check for tool use in the response
-                tool_use_blocks = [b for b in response_content if b.type == "tool_use"]
-
-                # No tool call - we're done
-                if not tool_use_blocks:
-                    logger.info(f"No tool call, response complete. Collected text length: {len(collected_text)}")
-                    break
-
-                # Handle tool call
-                tool_block = tool_use_blocks[0]
-                tool_name = tool_block.name
-                tool_input = tool_block.input
-                tool_use_id = tool_block.id
-
-                logger.info(f"Tool call: {tool_name} with input: {tool_input}")
-
-                # Send tool starting status
-                tool_status = ChatStatusResponse(
-                    status=f"Running {tool_name}...",
-                    payload={"tool": tool_name, "phase": "running"},
-                    error=None,
-                    debug=None
-                )
-                yield tool_status.model_dump_json()
-
-                # Execute tool
-                tool_result_str, tool_output_data = await self._execute_tool(
-                    tool_name, tool_input, tools_by_name, tool_context
-                )
-
-                # Record tool call in history
-                tool_call_history.append({
-                    "tool_name": tool_name,
-                    "input": tool_input,
-                    "output": tool_output_data if tool_output_data else tool_result_str
-                })
-
-                # Send tool completed status
-                tool_complete_status = ChatStatusResponse(
-                    status=f"Completed {tool_name}",
-                    payload={"tool": tool_name, "phase": "completed"},
-                    error=None,
-                    debug=None
-                )
-                yield tool_complete_status.model_dump_json()
-
-                # Add tool interaction to messages for next iteration
-                assistant_content = self._format_assistant_content(response_content)
-                messages.append({"role": "assistant", "content": assistant_content})
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": tool_result_str
-                    }]
-                })
-
-                # Update api_kwargs with new messages for next iteration
-                api_kwargs["messages"] = messages
-
-                # Add newline separator before next iteration's text
-                separator = "\n\n"
-                collected_text += separator
-                separator_response = ChatStreamChunk(
-                    token=separator,
-                    response_text=None,
-                    payload=None,
-                    status="streaming",
-                    error=None,
-                    debug=None
-                )
-                yield separator_response.model_dump_json()
-
-            # Save assistant message
-            conv_service.add_message(
-                conversation_id=conversation_id,
-                role="assistant",
-                content=collected_text,
-                tool_calls=tool_call_history if tool_call_history else None
-            )
-
-            # Build final payload
-            logger.info(f"Building final payload with collected_text length: {len(collected_text)}, tool_calls: {len(tool_call_history)}")
-            final_payload = ChatResponsePayload(
-                message=collected_text,
-                conversation_id=conversation_id,
-                suggested_values=None,
-                suggested_actions=None,
-                custom_payload={"type": "tool_history", "data": tool_call_history} if tool_call_history else None
-            )
-
-            final_response = ChatStreamChunk(
-                token=None,
-                response_text=None,
-                payload=final_payload,
-                status="complete",
-                error=None,
-                debug=None
-            )
-            logger.info(f"Yielding final response with status=complete")
-            yield final_response.model_dump_json()
-
-        except Exception as e:
-            logger.error(f"Error in chat service: {str(e)}", exc_info=True)
-            error_response = ChatStreamChunk(
-                token=None,
-                response_text=None,
-                payload=None,
-                status=None,
-                error=f"Service error: {str(e)}",
-                debug={"error_type": type(e).__name__}
-            )
-            yield error_response.model_dump_json()
-
-    def _build_system_prompt(
-        self,
-        context: Dict[str, Any],
-        user_message: Optional[str] = None,
-        enabled_tools: Optional[List[str]] = None,
-        include_profile: bool = True
-    ) -> str:
-        """Build the system prompt for the primary agent.
+        Get tools filtered by enabled list.
 
         Args:
-            context: Request context
-            user_message: The user's current message (for semantic memory search)
-            enabled_tools: List of enabled tool IDs (None = all tools)
-            include_profile: Whether to include user profile information
-        """
+            enabled_tools: List of tool IDs to enable (None = all tools)
 
-        # Get list of available tools for the prompt, filtered if needed
+        Returns:
+            List of tool configs
+        """
         all_tools = get_all_tools()
         if enabled_tools is not None:
             enabled_set = set(enabled_tools)
-            tools = [t for t in all_tools if t.name in enabled_set]
-        else:
-            tools = all_tools
+            return [t for t in all_tools if t.name in enabled_set]
+        return all_tools
 
+    def _get_tools_config(
+        self,
+        enabled_tools: Optional[List[str]] = None
+    ) -> Tuple[Dict[str, Any], Optional[List[Dict[str, Any]]], str]:
+        """
+        Get all tool-related configuration.
+
+        Args:
+            enabled_tools: List of tool IDs to enable (None = all tools)
+
+        Returns:
+            Tuple of (tools_by_name dict, anthropic_tools list, tool_descriptions string)
+        """
+        tools = self._get_filtered_tools(enabled_tools)
+
+        # Build lookup dict
+        tools_by_name = {tool.name: tool for tool in tools}
+
+        # Build Anthropic API format
+        anthropic_tools = [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schema
+            }
+            for tool in tools
+        ] if tools else None
+
+        # Build descriptions for system prompt
         tool_descriptions = "\n".join([
             f"- **{t.name}**: {t.description}"
             for t in tools
         ]) if tools else "No tools currently enabled."
 
-        # Get user's memories and assets for context
+        return tools_by_name, anthropic_tools, tool_descriptions
+
+    # =========================================================================
+    # Context Building Helpers
+    # =========================================================================
+
+    def _get_profile_context(self, include_profile: bool = True) -> str:
+        """
+        Get formatted user profile for system prompt.
+
+        Args:
+            include_profile: Whether to include profile info
+
+        Returns:
+            Formatted profile string or empty string
+        """
+        if not include_profile:
+            return ""
+
+        profile_service = ProfileService(self.db, self.user_id)
+        return profile_service.format_for_prompt()
+
+    def _get_memory_context(self, user_message: Optional[str] = None) -> str:
+        """
+        Get formatted memories for system prompt.
+
+        Args:
+            user_message: Current message for semantic search
+
+        Returns:
+            Formatted memory string
+        """
         memory_service = MemoryService(self.db, self.user_id)
+        return memory_service.format_for_prompt(include_relevant=user_message)
+
+    def _get_asset_context(self) -> str:
+        """
+        Get formatted assets for system prompt.
+
+        Returns:
+            Formatted asset string
+        """
         asset_service = AssetService(self.db, self.user_id)
+        return asset_service.format_for_prompt()
 
-        # Include semantically relevant memories based on user's message
-        memory_context = memory_service.format_for_prompt(include_relevant=user_message)
-        asset_context = asset_service.format_for_prompt()
+    def _build_context_section(
+        self,
+        user_message: Optional[str] = None,
+        include_profile: bool = True
+    ) -> str:
+        """
+        Build the complete user context section for system prompt.
 
-        # Get user profile if requested
-        profile_context = ""
-        if include_profile:
-            from models import User, UserProfile
-            user = self.db.query(User).filter(User.user_id == self.user_id).first()
-            if user:
-                profile_parts = []
-                if user.full_name:
-                    profile_parts.append(f"- Name: {user.full_name}")
-                if user.profile:
-                    if user.profile.display_name:
-                        profile_parts.append(f"- Display name: {user.profile.display_name}")
-                    if user.profile.bio:
-                        profile_parts.append(f"- Bio: {user.profile.bio}")
-                    if user.profile.preferences:
-                        prefs = user.profile.preferences
-                        if isinstance(prefs, dict):
-                            for key, value in prefs.items():
-                                profile_parts.append(f"- {key}: {value}")
-                if profile_parts:
-                    profile_context = "## User Profile\n" + "\n".join(profile_parts) + "\n"
+        Args:
+            user_message: Current message for semantic memory search
+            include_profile: Whether to include profile info
 
-        # Build context section
-        context_section = ""
-        if profile_context or memory_context or asset_context:
-            context_section = "\n## User Context\n"
-            if profile_context:
-                context_section += f"\n{profile_context}\n"
-            if memory_context:
-                context_section += f"\n{memory_context}\n"
-            if asset_context:
-                context_section += f"\n{asset_context}\n"
+        Returns:
+            Formatted context section string
+        """
+        profile_context = self._get_profile_context(include_profile)
+        memory_context = self._get_memory_context(user_message)
+        asset_context = self._get_asset_context()
+
+        if not any([profile_context, memory_context, asset_context]):
+            return ""
+
+        context_section = "\n## User Context\n"
+        if profile_context:
+            context_section += f"\n{profile_context}\n"
+        if memory_context:
+            context_section += f"\n{memory_context}\n"
+        if asset_context:
+            context_section += f"\n{asset_context}\n"
+
+        return context_section
+
+    # =========================================================================
+    # System Prompt Building
+    # =========================================================================
+
+    def _build_system_prompt(
+        self,
+        tool_descriptions: str,
+        user_message: Optional[str] = None,
+        include_profile: bool = True
+    ) -> str:
+        """
+        Build the system prompt for the primary agent.
+
+        Args:
+            tool_descriptions: Pre-formatted tool descriptions
+            user_message: The user's current message (for semantic memory search)
+            include_profile: Whether to include user profile information
+        """
+        context_section = self._build_context_section(user_message, include_profile)
 
         return f"""You are CMR Bot, a personal AI assistant with full access to tools and capabilities.
 
@@ -437,13 +273,17 @@ class GeneralChatService:
         Remember: You have real capabilities. Use them to actually help, not just to describe what you could theoretically do.
         """
 
+    # =========================================================================
+    # Tool Execution
+    # =========================================================================
+
     async def _execute_tool(
         self,
         tool_name: str,
         tool_input: Dict[str, Any],
         tools_by_name: Dict[str, Any],
         context: Dict[str, Any]
-    ) -> tuple[str, Any]:
+    ) -> Tuple[str, Any]:
         """Execute a tool and return (result_str, output_data)."""
         tool_config = tools_by_name.get(tool_name)
 
@@ -484,3 +324,227 @@ class GeneralChatService:
                     "input": block.input
                 })
         return assistant_content
+
+    # =========================================================================
+    # Main Chat Stream Handler
+    # =========================================================================
+
+    async def stream_chat_message(self, request) -> AsyncGenerator[str, None]:
+        """
+        Stream a chat message response with tool support via SSE.
+        """
+        from routers.general_chat import ChatStreamChunk, ChatStatusResponse
+
+        try:
+            user_prompt = request.message
+
+            # Handle conversation persistence
+            conv_service = ConversationService(self.db, self.user_id)
+            conversation_id = self._setup_conversation(conv_service, request, user_prompt)
+
+            # Load message history
+            messages = self._load_message_history(conv_service, conversation_id)
+
+            # Get tools configuration
+            tools_by_name, anthropic_tools, tool_descriptions = self._get_tools_config(
+                request.enabled_tools
+            )
+
+            # Build system prompt
+            system_prompt = self._build_system_prompt(
+                tool_descriptions,
+                user_message=user_prompt,
+                include_profile=request.include_profile
+            )
+
+            # Build tool context (passed to tool executors)
+            tool_context = {
+                **(request.context or {}),
+                "conversation_id": conversation_id
+            }
+
+            # Send initial status
+            yield ChatStatusResponse(
+                status="Thinking...",
+                payload=None,
+                error=None,
+                debug=None
+            ).model_dump_json()
+
+            # Chat loop state
+            iteration = 0
+            collected_text = ""
+            tool_call_history = []
+
+            api_kwargs = {
+                "model": CHAT_MODEL,
+                "max_tokens": CHAT_MAX_TOKENS,
+                "temperature": 0.7,
+                "system": system_prompt,
+                "messages": messages
+            }
+            if anthropic_tools:
+                api_kwargs["tools"] = anthropic_tools
+
+            while iteration < MAX_TOOL_ITERATIONS:
+                iteration += 1
+                logger.info(f"Loop iteration {iteration}")
+
+                current_text = ""
+                async with self.async_client.messages.stream(**api_kwargs) as stream:
+                    async for event in stream:
+                        if hasattr(event, 'type'):
+                            if event.type == 'content_block_delta' and hasattr(event, 'delta'):
+                                if hasattr(event.delta, 'text'):
+                                    text = event.delta.text
+                                    current_text += text
+                                    collected_text += text
+                                    yield ChatStreamChunk(
+                                        token=text,
+                                        response_text=None,
+                                        payload=None,
+                                        status="streaming",
+                                        error=None,
+                                        debug=None
+                                    ).model_dump_json()
+
+                    final_response = await stream.get_final_message()
+                    response_content = final_response.content
+
+                # Check for tool use
+                tool_use_blocks = [b for b in response_content if b.type == "tool_use"]
+
+                if not tool_use_blocks:
+                    logger.info(f"No tool call, response complete.")
+                    break
+
+                # Handle tool call
+                tool_block = tool_use_blocks[0]
+                tool_name = tool_block.name
+                tool_input = tool_block.input
+                tool_use_id = tool_block.id
+
+                logger.info(f"Tool call: {tool_name}")
+
+                yield ChatStatusResponse(
+                    status=f"Running {tool_name}...",
+                    payload={"tool": tool_name, "phase": "running"},
+                    error=None,
+                    debug=None
+                ).model_dump_json()
+
+                tool_result_str, tool_output_data = await self._execute_tool(
+                    tool_name, tool_input, tools_by_name, tool_context
+                )
+
+                tool_call_history.append({
+                    "tool_name": tool_name,
+                    "input": tool_input,
+                    "output": tool_output_data if tool_output_data else tool_result_str
+                })
+
+                yield ChatStatusResponse(
+                    status=f"Completed {tool_name}",
+                    payload={"tool": tool_name, "phase": "completed"},
+                    error=None,
+                    debug=None
+                ).model_dump_json()
+
+                # Add tool interaction to messages
+                assistant_content = self._format_assistant_content(response_content)
+                messages.append({"role": "assistant", "content": assistant_content})
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": tool_use_id,
+                        "content": tool_result_str
+                    }]
+                })
+                api_kwargs["messages"] = messages
+
+                # Add separator
+                separator = "\n\n"
+                collected_text += separator
+                yield ChatStreamChunk(
+                    token=separator,
+                    response_text=None,
+                    payload=None,
+                    status="streaming",
+                    error=None,
+                    debug=None
+                ).model_dump_json()
+
+            # Save assistant message
+            conv_service.add_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=collected_text,
+                tool_calls=tool_call_history if tool_call_history else None
+            )
+
+            # Build and yield final payload
+            final_payload = ChatResponsePayload(
+                message=collected_text,
+                conversation_id=conversation_id,
+                suggested_values=None,
+                suggested_actions=None,
+                custom_payload={"type": "tool_history", "data": tool_call_history} if tool_call_history else None
+            )
+
+            yield ChatStreamChunk(
+                token=None,
+                response_text=None,
+                payload=final_payload,
+                status="complete",
+                error=None,
+                debug=None
+            ).model_dump_json()
+
+        except Exception as e:
+            logger.error(f"Error in chat service: {str(e)}", exc_info=True)
+            yield ChatStreamChunk(
+                token=None,
+                response_text=None,
+                payload=None,
+                status=None,
+                error=f"Service error: {str(e)}",
+                debug={"error_type": type(e).__name__}
+            ).model_dump_json()
+
+    def _setup_conversation(
+        self,
+        conv_service: ConversationService,
+        request,
+        user_prompt: str
+    ) -> int:
+        """Set up conversation and save user message. Returns conversation_id."""
+        if request.conversation_id:
+            conversation = conv_service.get_conversation(request.conversation_id)
+            if not conversation:
+                raise ValueError(f"Conversation {request.conversation_id} not found")
+            conversation_id = conversation.conversation_id
+        else:
+            conversation = conv_service.create_conversation()
+            conversation_id = conversation.conversation_id
+
+        conv_service.add_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=user_prompt
+        )
+        conv_service.auto_title_if_needed(conversation_id)
+
+        return conversation_id
+
+    def _load_message_history(
+        self,
+        conv_service: ConversationService,
+        conversation_id: int
+    ) -> List[Dict[str, str]]:
+        """Load message history from database."""
+        db_messages = conv_service.get_messages(conversation_id)
+        return [
+            {"role": msg.role, "content": msg.content}
+            for msg in db_messages
+        ]
