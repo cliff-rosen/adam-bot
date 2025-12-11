@@ -1,15 +1,19 @@
-import { useState, useRef, useEffect } from 'react';
-import { PaperAirplaneIcon, WrenchScrewdriverIcon, XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, TrashIcon } from '@heroicons/react/24/solid';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { PaperAirplaneIcon, WrenchScrewdriverIcon, XMarkIcon, PlusIcon, ChatBubbleLeftRightIcon, TrashIcon, ChevronLeftIcon, ChevronRightIcon } from '@heroicons/react/24/solid';
 import { useGeneralChat } from '../hooks/useGeneralChat';
 import { InteractionType, ToolCall } from '../types/chat';
 import { MarkdownRenderer, JsonRenderer } from '../components/common';
 import { conversationApi, Conversation } from '../lib/api';
 
+const SIDEBAR_WIDTH = 256;
+const MIN_CHAT_WIDTH = 300;
+const MIN_WORKSPACE_WIDTH = 200;
+
 /**
  * Main page with three-panel layout:
- * - Left sidebar: Conversation history
+ * - Left sidebar: Conversation history (collapsible)
  * - Center: Chat interface for interacting with the AI agent
- * - Right: Collaborative workspace (content TBD)
+ * - Right: Collaborative workspace (resizable)
  */
 export default function MainPage() {
     const {
@@ -26,8 +30,49 @@ export default function MainPage() {
     const [selectedToolHistory, setSelectedToolHistory] = useState<ToolCall[] | null>(null);
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [isLoadingConversations, setIsLoadingConversations] = useState(true);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+    const [workspaceWidth, setWorkspaceWidth] = useState(400);
+    const [isDragging, setIsDragging] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    // Handle divider drag
+    const handleMouseDown = useCallback((e: React.MouseEvent) => {
+        e.preventDefault();
+        setIsDragging(true);
+    }, []);
+
+    useEffect(() => {
+        if (!isDragging) return;
+
+        const handleMouseMove = (e: MouseEvent) => {
+            if (!containerRef.current) return;
+            const containerRect = containerRef.current.getBoundingClientRect();
+            const sidebarW = isSidebarOpen ? SIDEBAR_WIDTH : 0;
+            const newWorkspaceWidth = containerRect.right - e.clientX;
+            const availableWidth = containerRect.width - sidebarW;
+
+            // Clamp workspace width
+            const clampedWidth = Math.max(
+                MIN_WORKSPACE_WIDTH,
+                Math.min(newWorkspaceWidth, availableWidth - MIN_CHAT_WIDTH)
+            );
+            setWorkspaceWidth(clampedWidth);
+        };
+
+        const handleMouseUp = () => {
+            setIsDragging(false);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+
+        return () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+    }, [isDragging, isSidebarOpen]);
 
     // Load conversation list
     useEffect(() => {
@@ -149,11 +194,15 @@ export default function MainPage() {
     };
 
     return (
-        <div className="flex h-full">
-            {/* Left Sidebar - Conversation List */}
-            <div className="w-64 flex flex-col border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900">
+        <div ref={containerRef} className={`flex h-full ${isDragging ? 'select-none' : ''}`}>
+            {/* Left Sidebar - Conversation List (Collapsible) */}
+            <div
+                className={`flex flex-col border-r border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 transition-all duration-300 ${
+                    isSidebarOpen ? 'w-64' : 'w-0'
+                } overflow-hidden`}
+            >
                 {/* Sidebar Header */}
-                <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 dark:border-gray-700">
+                <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 dark:border-gray-700 min-w-[256px]">
                     <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
                         Conversations
                     </h2>
@@ -167,7 +216,7 @@ export default function MainPage() {
                 </div>
 
                 {/* Conversation List */}
-                <div className="flex-1 overflow-y-auto">
+                <div className="flex-1 overflow-y-auto min-w-[256px]">
                     {isLoadingConversations ? (
                         <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
                             Loading...
@@ -211,8 +260,21 @@ export default function MainPage() {
                 </div>
             </div>
 
+            {/* Sidebar Toggle Button */}
+            <button
+                onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+                className="flex-shrink-0 w-6 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 border-r border-gray-200 dark:border-gray-700 transition-colors"
+                title={isSidebarOpen ? 'Hide conversations' : 'Show conversations'}
+            >
+                {isSidebarOpen ? (
+                    <ChevronLeftIcon className="h-4 w-4 text-gray-500" />
+                ) : (
+                    <ChevronRightIcon className="h-4 w-4 text-gray-500" />
+                )}
+            </button>
+
             {/* Center Panel - Chat */}
-            <div className="flex-1 flex flex-col border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900">
+            <div className="flex-1 flex flex-col bg-white dark:bg-gray-900 min-w-0">
                 {/* Chat Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
                     <div>
@@ -383,8 +445,20 @@ export default function MainPage() {
                 </div>
             </div>
 
+            {/* Resizable Divider */}
+            <div
+                onMouseDown={handleMouseDown}
+                className={`flex-shrink-0 w-1.5 cursor-col-resize hover:bg-blue-500 transition-colors ${
+                    isDragging ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'
+                }`}
+                title="Drag to resize"
+            />
+
             {/* Right Panel - Workspace */}
-            <div className="w-[400px] flex-shrink-0 flex flex-col bg-gray-50 dark:bg-gray-950">
+            <div
+                style={{ width: workspaceWidth }}
+                className="flex-shrink-0 flex flex-col bg-gray-50 dark:bg-gray-950"
+            >
                 {/* Workspace Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
                     <div>
