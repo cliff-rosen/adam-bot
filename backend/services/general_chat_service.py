@@ -60,16 +60,20 @@ class GeneralChatService:
 
     def _get_tools_config(
         self,
-        enabled_tools: Optional[List[str]] = None
-    ) -> Tuple[Dict[str, Any], Optional[List[Dict[str, Any]]], str]:
+        enabled_tools: Optional[List[str]] = None,
+        conversation_id: Optional[int] = None,
+        request_context: Optional[Dict[str, Any]] = None
+    ) -> Tuple[Dict[str, Any], Optional[List[Dict[str, Any]]], str, Dict[str, Any]]:
         """
         Get all tool-related configuration.
 
         Args:
             enabled_tools: List of tool IDs to enable (None = all tools)
+            conversation_id: Current conversation ID (for tool executor context)
+            request_context: Additional context from request (for tool executor context)
 
         Returns:
-            Tuple of (tools_by_name dict, anthropic_tools list, tool_descriptions string)
+            Tuple of (tools_by_name, anthropic_tools, tool_descriptions, tool_executor_context)
         """
         tools = self._get_filtered_tools(enabled_tools)
 
@@ -92,7 +96,13 @@ class GeneralChatService:
             for t in tools
         ]) if tools else "No tools currently enabled."
 
-        return tools_by_name, anthropic_tools, tool_descriptions
+        # Build context passed to tool executors
+        tool_executor_context = {
+            **(request_context or {}),
+            "conversation_id": conversation_id
+        }
+
+        return tools_by_name, anthropic_tools, tool_descriptions, tool_executor_context
 
     # =========================================================================
     # Context Building Helpers
@@ -346,8 +356,10 @@ class GeneralChatService:
             messages = self._load_message_history(conv_service, conversation_id)
 
             # Get tools configuration
-            tools_by_name, anthropic_tools, tool_descriptions = self._get_tools_config(
-                request.enabled_tools
+            tools_by_name, anthropic_tools, tool_descriptions, tool_executor_context = self._get_tools_config(
+                enabled_tools=request.enabled_tools,
+                conversation_id=conversation_id,
+                request_context=request.context
             )
 
             # Build system prompt
@@ -356,12 +368,6 @@ class GeneralChatService:
                 user_message=user_prompt,
                 include_profile=request.include_profile
             )
-
-            # Build tool context (passed to tool executors)
-            tool_context = {
-                **(request.context or {}),
-                "conversation_id": conversation_id
-            }
 
             # Send initial status
             yield ChatStatusResponse(
@@ -434,7 +440,7 @@ class GeneralChatService:
                 ).model_dump_json()
 
                 tool_result_str, tool_output_data = await self._execute_tool(
-                    tool_name, tool_input, tools_by_name, tool_context
+                    tool_name, tool_input, tools_by_name, tool_executor_context
                 )
 
                 tool_call_history.append({
