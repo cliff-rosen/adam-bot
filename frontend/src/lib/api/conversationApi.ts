@@ -4,12 +4,7 @@
  * Handles CRUD operations for conversations and message retrieval.
  */
 
-import settings from '../../config/settings';
-
-function getAuthHeader(): Record<string, string> {
-    const token = localStorage.getItem('authToken');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import { api } from './index';
 
 export interface Message {
     message_id: number;
@@ -37,26 +32,6 @@ export interface ConversationWithMessages extends Conversation {
     messages: Message[];
 }
 
-const API_BASE = settings.apiUrl;
-
-async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-    const authHeader = getAuthHeader();
-    const headers = {
-        'Content-Type': 'application/json',
-        ...authHeader,
-        ...options.headers,
-    };
-
-    const response = await fetch(url, { ...options, headers });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-        throw new Error(error.detail || `HTTP ${response.status}`);
-    }
-
-    return response;
-}
-
 export const conversationApi = {
     /**
      * List user's conversations
@@ -68,27 +43,24 @@ export const conversationApi = {
             include_archived: includeArchived.toString(),
         });
 
-        const response = await fetchWithAuth(`${API_BASE}/api/conversations?${params}`);
-        return response.json();
+        const response = await api.get(`/api/conversations?${params}`);
+        return response.data;
     },
 
     /**
      * Create a new conversation
      */
     async create(title?: string): Promise<Conversation> {
-        const response = await fetchWithAuth(`${API_BASE}/api/conversations`, {
-            method: 'POST',
-            body: JSON.stringify({ title }),
-        });
-        return response.json();
+        const response = await api.post('/api/conversations', { title });
+        return response.data;
     },
 
     /**
      * Get a specific conversation with messages
      */
     async get(conversationId: number): Promise<ConversationWithMessages> {
-        const response = await fetchWithAuth(`${API_BASE}/api/conversations/${conversationId}`);
-        return response.json();
+        const response = await api.get(`/api/conversations/${conversationId}`);
+        return response.data;
     },
 
     /**
@@ -98,20 +70,15 @@ export const conversationApi = {
         conversationId: number,
         updates: { title?: string; is_archived?: boolean }
     ): Promise<Conversation> {
-        const response = await fetchWithAuth(`${API_BASE}/api/conversations/${conversationId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updates),
-        });
-        return response.json();
+        const response = await api.put(`/api/conversations/${conversationId}`, updates);
+        return response.data;
     },
 
     /**
      * Delete a conversation
      */
     async delete(conversationId: number): Promise<void> {
-        await fetchWithAuth(`${API_BASE}/api/conversations/${conversationId}`, {
-            method: 'DELETE',
-        });
+        await api.delete(`/api/conversations/${conversationId}`);
     },
 
     /**
@@ -123,9 +90,7 @@ export const conversationApi = {
             offset: offset.toString(),
         });
 
-        const response = await fetchWithAuth(
-            `${API_BASE}/api/conversations/${conversationId}/messages?${params}`
-        );
-        return response.json();
+        const response = await api.get(`/api/conversations/${conversationId}/messages?${params}`);
+        return response.data;
     },
 };

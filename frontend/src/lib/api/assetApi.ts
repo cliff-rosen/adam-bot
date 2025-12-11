@@ -4,12 +4,7 @@
  * Handles CRUD operations for user assets.
  */
 
-import settings from '../../config/settings';
-
-function getAuthHeader(): Record<string, string> {
-    const token = localStorage.getItem('authToken');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import { api } from './index';
 
 export type AssetType = 'file' | 'document' | 'data' | 'code' | 'link';
 
@@ -50,26 +45,6 @@ export interface AssetUpdate {
     context_summary?: string;
 }
 
-const API_BASE = settings.apiUrl;
-
-async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-    const authHeader = getAuthHeader();
-    const headers = {
-        'Content-Type': 'application/json',
-        ...authHeader,
-        ...options.headers,
-    };
-
-    const response = await fetch(url, { ...options, headers });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-        throw new Error(error.detail || `HTTP ${response.status}`);
-    }
-
-    return response;
-}
-
 export const assetApi = {
     /**
      * List user's assets
@@ -88,66 +63,54 @@ export const assetApi = {
 
         if (assetType) params.set('asset_type', assetType);
 
-        const response = await fetchWithAuth(`${API_BASE}/api/assets?${params}`);
-        return response.json();
+        const response = await api.get(`/api/assets?${params}`);
+        return response.data;
     },
 
     /**
      * Create a new asset
      */
     async create(asset: AssetCreate): Promise<Asset> {
-        const response = await fetchWithAuth(`${API_BASE}/api/assets`, {
-            method: 'POST',
-            body: JSON.stringify(asset),
-        });
-        return response.json();
+        const response = await api.post('/api/assets', asset);
+        return response.data;
     },
 
     /**
      * Get a specific asset
      */
     async get(assetId: number): Promise<Asset> {
-        const response = await fetchWithAuth(`${API_BASE}/api/assets/${assetId}`);
-        return response.json();
+        const response = await api.get(`/api/assets/${assetId}`);
+        return response.data;
     },
 
     /**
      * Update an asset
      */
     async update(assetId: number, updates: AssetUpdate): Promise<Asset> {
-        const response = await fetchWithAuth(`${API_BASE}/api/assets/${assetId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updates),
-        });
-        return response.json();
+        const response = await api.put(`/api/assets/${assetId}`, updates);
+        return response.data;
     },
 
     /**
      * Delete an asset
      */
     async delete(assetId: number): Promise<void> {
-        await fetchWithAuth(`${API_BASE}/api/assets/${assetId}`, {
-            method: 'DELETE',
-        });
+        await api.delete(`/api/assets/${assetId}`);
     },
 
     /**
      * Toggle asset in-context status
      */
     async toggleContext(assetId: number): Promise<{ asset_id: number; is_in_context: boolean }> {
-        const response = await fetchWithAuth(`${API_BASE}/api/assets/${assetId}/context`, {
-            method: 'POST',
-        });
-        return response.json();
+        const response = await api.post(`/api/assets/${assetId}/context`);
+        return response.data;
     },
 
     /**
      * Clear all assets from context
      */
     async clearContext(): Promise<{ status: string; count: number }> {
-        const response = await fetchWithAuth(`${API_BASE}/api/assets/context/clear`, {
-            method: 'DELETE',
-        });
-        return response.json();
+        const response = await api.delete('/api/assets/context/clear');
+        return response.data;
     },
 };

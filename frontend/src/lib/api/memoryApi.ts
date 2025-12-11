@@ -4,12 +4,7 @@
  * Handles CRUD operations for user memories.
  */
 
-import settings from '../../config/settings';
-
-function getAuthHeader(): Record<string, string> {
-    const token = localStorage.getItem('authToken');
-    return token ? { Authorization: `Bearer ${token}` } : {};
-}
+import { api } from './index';
 
 export type MemoryType = 'working' | 'fact' | 'preference' | 'entity' | 'project';
 
@@ -42,26 +37,6 @@ export interface MemoryUpdate {
     is_pinned?: boolean;
 }
 
-const API_BASE = settings.apiUrl;
-
-async function fetchWithAuth(url: string, options: RequestInit = {}): Promise<Response> {
-    const authHeader = getAuthHeader();
-    const headers = {
-        'Content-Type': 'application/json',
-        ...authHeader,
-        ...options.headers,
-    };
-
-    const response = await fetch(url, { ...options, headers });
-
-    if (!response.ok) {
-        const error = await response.json().catch(() => ({ detail: 'Request failed' }));
-        throw new Error(error.detail || `HTTP ${response.status}`);
-    }
-
-    return response;
-}
-
 export const memoryApi = {
     /**
      * List user's memories
@@ -82,76 +57,62 @@ export const memoryApi = {
         if (memoryType) params.set('memory_type', memoryType);
         if (category) params.set('category', category);
 
-        const response = await fetchWithAuth(`${API_BASE}/api/memories?${params}`);
-        return response.json();
+        const response = await api.get(`/api/memories?${params}`);
+        return response.data;
     },
 
     /**
      * Create a new memory
      */
     async create(memory: MemoryCreate): Promise<Memory> {
-        const response = await fetchWithAuth(`${API_BASE}/api/memories`, {
-            method: 'POST',
-            body: JSON.stringify(memory),
-        });
-        return response.json();
+        const response = await api.post('/api/memories', memory);
+        return response.data;
     },
 
     /**
      * Get a specific memory
      */
     async get(memoryId: number): Promise<Memory> {
-        const response = await fetchWithAuth(`${API_BASE}/api/memories/${memoryId}`);
-        return response.json();
+        const response = await api.get(`/api/memories/${memoryId}`);
+        return response.data;
     },
 
     /**
      * Update a memory
      */
     async update(memoryId: number, updates: MemoryUpdate): Promise<Memory> {
-        const response = await fetchWithAuth(`${API_BASE}/api/memories/${memoryId}`, {
-            method: 'PUT',
-            body: JSON.stringify(updates),
-        });
-        return response.json();
+        const response = await api.put(`/api/memories/${memoryId}`, updates);
+        return response.data;
     },
 
     /**
      * Delete a memory
      */
     async delete(memoryId: number): Promise<void> {
-        await fetchWithAuth(`${API_BASE}/api/memories/${memoryId}`, {
-            method: 'DELETE',
-        });
+        await api.delete(`/api/memories/${memoryId}`);
     },
 
     /**
      * Toggle memory active status
      */
     async toggleActive(memoryId: number): Promise<{ memory_id: number; is_active: boolean }> {
-        const response = await fetchWithAuth(`${API_BASE}/api/memories/${memoryId}/toggle`, {
-            method: 'POST',
-        });
-        return response.json();
+        const response = await api.post(`/api/memories/${memoryId}/toggle`);
+        return response.data;
     },
 
     /**
      * Toggle memory pinned status
      */
     async togglePinned(memoryId: number): Promise<{ memory_id: number; is_pinned: boolean }> {
-        const response = await fetchWithAuth(`${API_BASE}/api/memories/${memoryId}/pin`, {
-            method: 'POST',
-        });
-        return response.json();
+        const response = await api.post(`/api/memories/${memoryId}/pin`);
+        return response.data;
     },
 
     /**
      * Clear all working memories
      */
     async clearWorkingMemory(): Promise<{ status: string; count: number }> {
-        const response = await fetchWithAuth(`${API_BASE}/api/memories/working/clear`, {
-            method: 'DELETE',
-        });
-        return response.json();
+        const response = await api.delete('/api/memories/working/clear');
+        return response.data;
     },
 };
