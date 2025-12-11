@@ -1,9 +1,11 @@
 import { useState } from 'react';
 import {
-    XMarkIcon, DocumentIcon, TrashIcon, PlusIcon, MinusIcon,
+    XMarkIcon, DocumentIcon, TrashIcon,
     MagnifyingGlassIcon, DocumentTextIcon, CodeBracketIcon,
-    LinkIcon, TableCellsIcon, PhotoIcon
+    LinkIcon, TableCellsIcon, PhotoIcon, PencilIcon,
+    CheckIcon, ArrowsPointingOutIcon
 } from '@heroicons/react/24/solid';
+import { CheckCircleIcon as CheckCircleOutlineIcon } from '@heroicons/react/24/outline';
 import { Asset, AssetType } from '../../lib/api';
 
 interface AssetBrowserModalProps {
@@ -12,6 +14,7 @@ interface AssetBrowserModalProps {
     onClose: () => void;
     onToggleContext: (assetId: number) => void;
     onDelete: (assetId: number) => void;
+    onUpdateAsset?: (assetId: number, content: string) => void;
 }
 
 // Helper to get asset type icon
@@ -39,12 +42,15 @@ export default function AssetBrowserModal({
     assets,
     onClose,
     onToggleContext,
-    onDelete
+    onDelete,
+    onUpdateAsset
 }: AssetBrowserModalProps) {
     const [filter, setFilter] = useState<FilterType>('all');
     const [searchQuery, setSearchQuery] = useState('');
     const [confirmDelete, setConfirmDelete] = useState<number | null>(null);
-    const [expandedAsset, setExpandedAsset] = useState<number | null>(null);
+    const [viewingAsset, setViewingAsset] = useState<Asset | null>(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editContent, setEditContent] = useState('');
 
     if (!isOpen) return null;
 
@@ -88,15 +94,123 @@ export default function AssetBrowserModal({
         }
     };
 
+    const handleViewAsset = (asset: Asset) => {
+        setViewingAsset(asset);
+        setEditContent(asset.content || '');
+        setIsEditing(false);
+    };
+
+    const handleCloseViewer = () => {
+        setViewingAsset(null);
+        setIsEditing(false);
+        setEditContent('');
+    };
+
+    const handleSaveEdit = () => {
+        if (viewingAsset && onUpdateAsset && editContent !== viewingAsset.content) {
+            onUpdateAsset(viewingAsset.asset_id, editContent);
+            // Update local state
+            setViewingAsset({ ...viewingAsset, content: editContent });
+        }
+        setIsEditing(false);
+    };
+
     const filterButtons: { key: FilterType; label: string; icon?: React.ComponentType<{ className?: string }>; color?: string }[] = [
         { key: 'all', label: 'All' },
-        { key: 'in_context', label: 'In Context', icon: PlusIcon, color: 'text-orange-500' },
+        { key: 'in_context', label: 'In Context', icon: CheckIcon, color: 'text-orange-500' },
         { key: 'document', label: 'Documents', icon: DocumentTextIcon, color: 'text-blue-500' },
         { key: 'code', label: 'Code', icon: CodeBracketIcon, color: 'text-green-500' },
         { key: 'data', label: 'Data', icon: TableCellsIcon, color: 'text-purple-500' },
         { key: 'link', label: 'Links', icon: LinkIcon, color: 'text-cyan-500' },
         { key: 'file', label: 'Files', icon: PhotoIcon, color: 'text-orange-500' },
     ];
+
+    // Asset viewer/editor modal (nested)
+    if (viewingAsset) {
+        const typeInfo = getAssetTypeInfo(viewingAsset.asset_type);
+        const TypeIcon = typeInfo.icon;
+        const isEditable = ['document', 'code', 'data'].includes(viewingAsset.asset_type);
+
+        return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+                <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl w-[95vw] h-[95vh] max-w-6xl flex flex-col">
+                    {/* Header */}
+                    <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                        <div className="flex items-center gap-3">
+                            <TypeIcon className={`h-6 w-6 ${typeInfo.color}`} />
+                            <div>
+                                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                                    {viewingAsset.name}
+                                </h2>
+                                {viewingAsset.description && (
+                                    <p className="text-sm text-gray-500">{viewingAsset.description}</p>
+                                )}
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                            {isEditable && !isEditing && onUpdateAsset && (
+                                <button
+                                    onClick={() => setIsEditing(true)}
+                                    className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                >
+                                    <PencilIcon className="h-4 w-4" />
+                                    Edit
+                                </button>
+                            )}
+                            {isEditing && (
+                                <>
+                                    <button
+                                        onClick={handleSaveEdit}
+                                        className="flex items-center gap-1 px-3 py-2 text-sm text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-900/20 rounded-lg transition-colors"
+                                    >
+                                        <CheckIcon className="h-4 w-4" />
+                                        Save
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setEditContent(viewingAsset.content || '');
+                                            setIsEditing(false);
+                                        }}
+                                        className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg transition-colors"
+                                    >
+                                        <XMarkIcon className="h-4 w-4" />
+                                        Cancel
+                                    </button>
+                                </>
+                            )}
+                            <button
+                                onClick={handleCloseViewer}
+                                className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-lg"
+                            >
+                                <XMarkIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="flex-1 overflow-y-auto p-6">
+                        {isEditing ? (
+                            <textarea
+                                value={editContent}
+                                onChange={(e) => setEditContent(e.target.value)}
+                                className="w-full h-full min-h-[60vh] p-4 text-sm font-mono bg-gray-50 dark:bg-gray-950 border border-gray-300 dark:border-gray-600 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
+                            />
+                        ) : viewingAsset.asset_type === 'code' ? (
+                            <pre className="p-4 bg-gray-900 dark:bg-black rounded-lg text-sm text-gray-100 overflow-x-auto whitespace-pre-wrap min-h-[60vh]">
+                                {viewingAsset.content || 'No content'}
+                            </pre>
+                        ) : (
+                            <div className="prose prose-sm dark:prose-invert max-w-none p-4 bg-gray-50 dark:bg-gray-950 rounded-lg min-h-[60vh]">
+                                <pre className="whitespace-pre-wrap font-sans text-gray-700 dark:text-gray-300">
+                                    {viewingAsset.content || 'No content'}
+                                </pre>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -174,7 +288,6 @@ export default function AssetBrowserModal({
                                 const typeInfo = getAssetTypeInfo(asset.asset_type);
                                 const TypeIcon = typeInfo.icon;
                                 const isConfirmingDelete = confirmDelete === asset.asset_id;
-                                const isExpanded = expandedAsset === asset.asset_id;
 
                                 return (
                                     <div
@@ -185,8 +298,8 @@ export default function AssetBrowserModal({
                                                 : 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800'
                                         }`}
                                     >
-                                        {/* Asset header */}
-                                        <div className="flex items-start gap-3 p-4">
+                                        {/* Asset row */}
+                                        <div className="flex items-center gap-3 p-4">
                                             {/* Type icon */}
                                             <div className={`p-2 rounded-lg ${typeInfo.bg}`}>
                                                 <TypeIcon className={`h-4 w-4 ${typeInfo.color}`} />
@@ -206,11 +319,6 @@ export default function AssetBrowserModal({
                                                     <span className={`px-2 py-0.5 rounded ${typeInfo.bg} ${typeInfo.color}`}>
                                                         {typeInfo.label}
                                                     </span>
-                                                    {asset.is_in_context && (
-                                                        <span className="px-2 py-0.5 rounded bg-orange-100 dark:bg-orange-900/50 text-orange-600 dark:text-orange-400">
-                                                            In Context
-                                                        </span>
-                                                    )}
                                                     <span>
                                                         {new Date(asset.created_at).toLocaleDateString()}
                                                     </span>
@@ -219,19 +327,18 @@ export default function AssetBrowserModal({
 
                                             {/* Actions */}
                                             <div className="flex items-center gap-1">
+                                                {/* View/Edit button */}
                                                 {asset.content && (
                                                     <button
-                                                        onClick={() => setExpandedAsset(isExpanded ? null : asset.asset_id)}
-                                                        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-                                                        title={isExpanded ? 'Collapse' : 'Expand'}
+                                                        onClick={() => handleViewAsset(asset)}
+                                                        className="p-2 text-gray-400 hover:text-blue-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
+                                                        title="View/Edit"
                                                     >
-                                                        {isExpanded ? (
-                                                            <MinusIcon className="h-5 w-5" />
-                                                        ) : (
-                                                            <PlusIcon className="h-5 w-5" />
-                                                        )}
+                                                        <ArrowsPointingOutIcon className="h-5 w-5" />
                                                     </button>
                                                 )}
+
+                                                {/* Context toggle */}
                                                 <button
                                                     onClick={() => onToggleContext(asset.asset_id)}
                                                     className={`p-2 rounded-lg transition-colors ${
@@ -242,11 +349,13 @@ export default function AssetBrowserModal({
                                                     title={asset.is_in_context ? 'Remove from context' : 'Add to context'}
                                                 >
                                                     {asset.is_in_context ? (
-                                                        <XMarkIcon className="h-5 w-5" />
+                                                        <CheckIcon className="h-5 w-5" />
                                                     ) : (
-                                                        <PlusIcon className="h-5 w-5" />
+                                                        <CheckCircleOutlineIcon className="h-5 w-5" />
                                                     )}
                                                 </button>
+
+                                                {/* Delete button */}
                                                 <button
                                                     onClick={() => handleDelete(asset.asset_id)}
                                                     className={`p-2 rounded-lg transition-colors ${
@@ -260,15 +369,6 @@ export default function AssetBrowserModal({
                                                 </button>
                                             </div>
                                         </div>
-
-                                        {/* Expanded content */}
-                                        {isExpanded && asset.content && (
-                                            <div className="px-4 pb-4">
-                                                <pre className="p-3 bg-gray-100 dark:bg-gray-900 rounded-lg text-xs text-gray-700 dark:text-gray-300 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">
-                                                    {asset.content}
-                                                </pre>
-                                            </div>
-                                        )}
                                     </div>
                                 );
                             })}

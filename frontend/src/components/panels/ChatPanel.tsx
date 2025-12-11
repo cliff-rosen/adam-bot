@@ -33,6 +33,7 @@ export default function ChatPanel({
     const [input, setInput] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const lastPayloadShownRef = useRef<string | null>(null);
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -41,6 +42,23 @@ export default function ChatPanel({
     useEffect(() => {
         scrollToBottom();
     }, [messages, streamingText]);
+
+    // Auto-show payload in workspace when new message with payload arrives
+    useEffect(() => {
+        if (messages.length === 0) return;
+        const lastMessage = messages[messages.length - 1];
+        if (lastMessage.role !== 'assistant') return;
+
+        const { payload } = parseWorkspacePayload(lastMessage.content);
+        if (payload) {
+            // Create a unique key for this payload to avoid re-triggering
+            const payloadKey = `${lastMessage.timestamp}-${payload.title}`;
+            if (lastPayloadShownRef.current !== payloadKey) {
+                lastPayloadShownRef.current = payloadKey;
+                onPayloadClick(payload);
+            }
+        }
+    }, [messages, onPayloadClick]);
 
     // Auto-resize textarea
     useEffect(() => {

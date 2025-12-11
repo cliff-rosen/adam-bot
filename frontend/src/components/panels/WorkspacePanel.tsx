@@ -12,7 +12,7 @@ interface WorkspacePanelProps {
     activePayload: WorkspacePayload | null;
     onClose: () => void;
     onSaveAsAsset: (toolCall: ToolCall) => void;
-    onSavePayloadAsAsset: (payload: WorkspacePayload) => void;
+    onSavePayloadAsAsset: (payload: WorkspacePayload, andClose?: boolean) => void;
     onPayloadEdit: (payload: WorkspacePayload) => void;
 }
 
@@ -172,12 +172,20 @@ export default function WorkspacePanel({
                                     </>
                                 )}
                                 <button
-                                    onClick={() => onSavePayloadAsAsset(activePayload)}
+                                    onClick={() => onSavePayloadAsAsset(activePayload, false)}
                                     className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded transition-colors"
                                     title="Save as asset"
                                 >
                                     <ArchiveBoxArrowDownIcon className="h-3 w-3" />
                                     Save
+                                </button>
+                                <button
+                                    onClick={() => onSavePayloadAsAsset(activePayload, true)}
+                                    className="flex items-center gap-1 px-2 py-1 text-xs text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
+                                    title="Save as asset and close"
+                                >
+                                    <CheckIcon className="h-3 w-3" />
+                                    Save & Close
                                 </button>
                             </div>
                         </div>

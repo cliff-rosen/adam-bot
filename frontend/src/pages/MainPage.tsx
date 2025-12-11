@@ -224,6 +224,17 @@ export default function MainPage() {
         }
     };
 
+    const handleUpdateAsset = async (assetId: number, content: string) => {
+        try {
+            const updated = await assetApi.update(assetId, { content });
+            setAssets(prev => prev.map(a =>
+                a.asset_id === assetId ? { ...a, content: updated.content } : a
+            ));
+        } catch (err) {
+            console.error('Failed to update asset:', err);
+        }
+    };
+
     const handleClearAllAssetsFromContext = async () => {
         try {
             const contextAssets = assets.filter(a => a.is_in_context);
@@ -279,7 +290,7 @@ export default function MainPage() {
         setActivePayload(updatedPayload);
     };
 
-    const handleSavePayloadAsAsset = async (payload: WorkspacePayload) => {
+    const handleSavePayloadAsAsset = async (payload: WorkspacePayload, andClose?: boolean) => {
         try {
             const assetType = payload.type === 'code' ? 'code' : 'document';
             const newAsset = await assetApi.create({
@@ -290,6 +301,9 @@ export default function MainPage() {
                 source_conversation_id: conversationId || undefined
             });
             setAssets(prev => [newAsset, ...prev]);
+            if (andClose) {
+                setActivePayload(null);
+            }
         } catch (err) {
             console.error('Failed to save payload as asset:', err);
         }
@@ -422,6 +436,7 @@ export default function MainPage() {
                 onClose={() => setIsAssetModalOpen(false)}
                 onToggleContext={handleToggleAssetContext}
                 onDelete={handleDeleteAsset}
+                onUpdateAsset={handleUpdateAsset}
             />
         </div>
     );
