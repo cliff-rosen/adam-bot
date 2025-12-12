@@ -405,27 +405,36 @@ RIGHT: [Actually call web_search, then return the compiled list]
             # If it's a generator, iterate through it
             if isinstance(generator, types.GeneratorType):
                 final_result = None
+
+                # Sentinel to indicate StopIteration (can't propagate through asyncio.to_thread)
+                _STOP = object()
+
+                def get_next_safe():
+                    """Get next item, returning sentinel tuple on StopIteration."""
+                    try:
+                        return (next(generator), None)
+                    except StopIteration as e:
+                        return (_STOP, e.value)
+
                 try:
                     while True:
-                        # Get next item from generator in thread
-                        def get_next():
-                            return next(generator)
-                        try:
-                            item = await asyncio.to_thread(get_next)
-                            if isinstance(item, ToolProgress):
-                                yield item
-                            elif isinstance(item, ToolResult):
-                                final_result = item.text
-                        except StopIteration as e:
-                            # Generator returned a value
-                            if e.value is not None:
-                                if isinstance(e.value, ToolResult):
-                                    final_result = e.value.text
-                                elif isinstance(e.value, str):
-                                    final_result = e.value
+                        item, return_value = await asyncio.to_thread(get_next_safe)
+
+                        if item is _STOP:
+                            # Generator finished
+                            if return_value is not None:
+                                if isinstance(return_value, ToolResult):
+                                    final_result = return_value.text
+                                elif isinstance(return_value, str):
+                                    final_result = return_value
                                 else:
-                                    final_result = str(e.value)
+                                    final_result = str(return_value)
                             break
+
+                        if isinstance(item, ToolProgress):
+                            yield item
+                        elif isinstance(item, ToolResult):
+                            final_result = item.text
                 except Exception as e:
                     logger.error(f"Streaming tool iteration error: {e}", exc_info=True)
                     yield f"Error during tool execution: {str(e)}"
