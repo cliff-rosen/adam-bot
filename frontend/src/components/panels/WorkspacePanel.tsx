@@ -168,10 +168,10 @@ export default function WorkspacePanel({
             </div>
 
             {/* Workspace Content */}
-            <div className="flex-1 overflow-hidden p-4 flex flex-col">
+            <div className={`flex-1 p-4 ${showExecuting || (showPayload && (activePayload?.type === 'plan' || activePayload?.type === 'wip')) ? 'overflow-hidden flex flex-col' : 'overflow-y-auto'}`}>
                 {/* Step Executing View */}
                 {showExecuting && (
-                    <div className="flex flex-col h-full min-h-0">
+                    <div className="flex flex-col h-full min-h-0 overflow-hidden">
                         {/* Header area with spinner and status */}
                         <div className="flex items-center gap-4 mb-4 flex-shrink-0">
                             <div className="flex-shrink-0">
@@ -308,9 +308,9 @@ export default function WorkspacePanel({
 
                 {/* Plan Payload View */}
                 {showPayload && activePayload.type === 'plan' && config && (
-                    <div className={`rounded-lg border ${config.border} ${config.bg} overflow-hidden`}>
+                    <div className={`flex flex-col h-full rounded-lg border ${config.border} ${config.bg} overflow-hidden`}>
                         {/* Plan Header */}
-                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                        <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <PayloadIcon className={`h-5 w-5 ${config.color}`} />
                                 <span className="font-medium text-gray-900 dark:text-white">
@@ -319,8 +319,8 @@ export default function WorkspacePanel({
                             </div>
                         </div>
 
-                        {/* Plan Content */}
-                        <div className="p-4 space-y-4">
+                        {/* Plan Content - scrollable */}
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
                             {/* Goal */}
                             {activePayload.goal && (
                                 <div>
@@ -375,8 +375,8 @@ export default function WorkspacePanel({
                             )}
                         </div>
 
-                        {/* Plan Actions */}
-                        <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-end gap-3">
+                        {/* Plan Actions - fixed at bottom */}
+                        <div className="flex-shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-end gap-3">
                             <button
                                 onClick={onRejectPlan}
                                 className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
@@ -395,9 +395,9 @@ export default function WorkspacePanel({
 
                 {/* WIP Payload View */}
                 {showPayload && activePayload.type === 'wip' && config && (
-                    <div className={`rounded-lg border ${config.border} ${config.bg} overflow-hidden`}>
+                    <div className={`flex flex-col h-full rounded-lg border ${config.border} ${config.bg} overflow-hidden`}>
                         {/* WIP Header */}
-                        <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                        <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
                             <div className="flex items-center gap-2">
                                 <PayloadIcon className={`h-5 w-5 ${config.color}`} />
                                 <span className="font-medium text-gray-900 dark:text-white">
@@ -421,8 +421,8 @@ export default function WorkspacePanel({
                             )}
                         </div>
 
-                        {/* WIP Content */}
-                        <div className="p-4">
+                        {/* WIP Content - scrollable */}
+                        <div className="flex-1 overflow-y-auto p-4">
                             {isEditing ? (
                                 <div className="space-y-3">
                                     <textarea
@@ -461,9 +461,9 @@ export default function WorkspacePanel({
                             )}
                         </div>
 
-                        {/* WIP Actions */}
+                        {/* WIP Actions - fixed at bottom */}
                         {!isEditing && (
-                            <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-end gap-3">
+                            <div className="flex-shrink-0 px-4 py-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/50 flex items-center justify-end gap-3">
                                 <button
                                     onClick={onRejectWip}
                                     className="px-4 py-2 text-sm font-medium text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
