@@ -23,10 +23,18 @@ export interface ChatResponsePayload {
     custom_payload?: CustomPayload;
 }
 
+export interface ToolProgressPayload {
+    tool: string;
+    phase: 'started' | 'progress' | 'completed';
+    stage?: string;
+    data?: Record<string, any>;
+    progress?: number;
+}
+
 export interface ChatStreamChunk {
     token?: string | null;
     response_text?: string | null;
-    payload?: ChatResponsePayload | null;
+    payload?: ChatResponsePayload | ToolProgressPayload | null;
     status?: string | null;
     error?: string | null;
     debug?: any;

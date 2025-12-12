@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { PaperAirplaneIcon, WrenchScrewdriverIcon, DocumentPlusIcon, ArrowTopRightOnSquareIcon } from '@heroicons/react/24/solid';
 import { MarkdownRenderer } from '../common';
 import { GeneralChatMessage, ToolCall, SuggestedValue, SuggestedAction, WorkspacePayload, parseWorkspacePayload } from '../../types/chat';
+import { ActiveToolProgress } from '../../hooks/useGeneralChat';
 
 interface ChatPanelProps {
     messages: GeneralChatMessage[];
@@ -9,6 +10,7 @@ interface ChatPanelProps {
     isLoading: boolean;
     streamingText: string;
     statusText: string | null;
+    activeToolProgress: ActiveToolProgress | null;
     onSendMessage: (message: string) => void;
     onValueSelect: (value: string) => void;
     onActionClick: (action: any) => void;
@@ -23,6 +25,7 @@ export default function ChatPanel({
     isLoading,
     streamingText,
     statusText,
+    activeToolProgress,
     onSendMessage,
     onValueSelect,
     onActionClick,
@@ -255,8 +258,56 @@ export default function ChatPanel({
                     </div>
                 )}
 
-                {/* Loading indicator - only when no streaming text yet */}
-                {isLoading && !streamingText && (
+                {/* Tool Progress indicator */}
+                {activeToolProgress && (
+                    <div className="flex justify-start">
+                        <div className="max-w-[85%] rounded-lg px-4 py-3 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800">
+                            <div className="flex items-center gap-2 mb-2">
+                                <WrenchScrewdriverIcon className="h-4 w-4 text-blue-600 dark:text-blue-400 animate-spin" />
+                                <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                                    Running: {activeToolProgress.toolName.replace(/_/g, ' ')}
+                                </span>
+                            </div>
+                            {/* Show latest stage info */}
+                            {activeToolProgress.updates.length > 0 && (() => {
+                                const latestUpdate = activeToolProgress.updates[activeToolProgress.updates.length - 1];
+                                return (
+                                    <div className="space-y-2">
+                                        {latestUpdate.stage && (
+                                            <p className="text-xs text-blue-700 dark:text-blue-300">
+                                                {latestUpdate.stage}
+                                            </p>
+                                        )}
+                                        {typeof latestUpdate.progress === 'number' && (
+                                            <div className="w-full bg-blue-200 dark:bg-blue-800 rounded-full h-1.5">
+                                                <div
+                                                    className="bg-blue-600 dark:bg-blue-400 h-1.5 rounded-full transition-all duration-300"
+                                                    style={{ width: `${Math.min(100, Math.max(0, latestUpdate.progress))}%` }}
+                                                />
+                                            </div>
+                                        )}
+                                        {latestUpdate.data && Object.keys(latestUpdate.data).length > 0 && (
+                                            <div className="text-xs text-blue-600 dark:text-blue-400 space-y-0.5">
+                                                {latestUpdate.data.results_count !== undefined && (
+                                                    <p>Results: {latestUpdate.data.results_count}</p>
+                                                )}
+                                                {latestUpdate.data.pages_fetched !== undefined && (
+                                                    <p>Pages fetched: {latestUpdate.data.pages_fetched}</p>
+                                                )}
+                                                {latestUpdate.data.current_query && (
+                                                    <p className="truncate">Query: {latestUpdate.data.current_query}</p>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })()}
+                        </div>
+                    </div>
+                )}
+
+                {/* Loading indicator - only when no streaming text and no tool progress */}
+                {isLoading && !streamingText && !activeToolProgress && (
                     <div className="flex justify-start">
                         <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3">
                             <div className="flex items-center gap-2">

@@ -8,11 +8,32 @@ for executing tools (both streaming and non-streaming).
 import asyncio
 import types
 import logging
-from typing import Any, Dict, AsyncGenerator, Tuple, Union
+from typing import Any, Coroutine, Dict, AsyncGenerator, Tuple, TypeVar, Union
 
 from tools.registry import ToolResult, ToolProgress, ToolConfig
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
+
+
+def run_async(coro: Coroutine[Any, Any, T]) -> T:
+    """
+    Run an async coroutine from a sync context.
+
+    This is used by tool executors that need to call async services
+    (like SearchService, WebRetrievalService) from their sync executor functions.
+
+    Uses asyncio.run() which properly creates and cleans up an event loop.
+    This is safe because tool executors run in a separate thread via asyncio.to_thread().
+
+    Args:
+        coro: The coroutine to run
+
+    Returns:
+        The result of the coroutine
+    """
+    return asyncio.run(coro)
 
 
 async def execute_streaming_tool(

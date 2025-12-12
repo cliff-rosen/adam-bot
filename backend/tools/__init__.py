@@ -18,7 +18,8 @@ from .registry import (
 
 from .executor import (
     execute_tool,
-    execute_streaming_tool
+    execute_streaming_tool,
+    run_async
 )
 
 from .builtin import register_all_builtin_tools
@@ -36,6 +37,7 @@ __all__ = [
     # Execution utilities
     'execute_tool',
     'execute_streaming_tool',
+    'run_async',
     # Registration
     'register_all_builtin_tools'
 ]

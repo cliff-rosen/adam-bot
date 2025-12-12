@@ -9,6 +9,7 @@ from typing import Dict, Any
 from sqlalchemy.orm import Session
 
 from tools.registry import ToolConfig, ToolResult, register_tool
+from tools.executor import run_async
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,6 @@ def execute_web_search(
 ) -> ToolResult:
     """Execute a web search using the search service."""
     from services.search_service import SearchService, SearchQuotaExceededError, SearchAPIError
-    import asyncio
 
     query = params.get("query", "")
     num_results = params.get("num_results", 5)
@@ -38,15 +38,9 @@ def execute_web_search(
         if not search_service.initialized:
             search_service.initialize()
 
-        # Run async search in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(
-                search_service.search(search_term=query, num_results=num_results)
-            )
-        finally:
-            loop.close()
+        result = run_async(
+            search_service.search(search_term=query, num_results=num_results)
+        )
 
         # Format results for LLM
         search_results = result.get("search_results", [])
@@ -126,7 +120,6 @@ def execute_fetch_webpage(
 ) -> ToolResult:
     """Fetch and extract content from a webpage."""
     from services.web_retrieval_service import WebRetrievalService
-    import asyncio
 
     url = params.get("url", "")
 
@@ -136,15 +129,9 @@ def execute_fetch_webpage(
     try:
         service = WebRetrievalService()
 
-        # Run async fetch in sync context
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            result = loop.run_until_complete(
-                service.retrieve_webpage(url=url, extract_text_only=True)
-            )
-        finally:
-            loop.close()
+        result = run_async(
+            service.retrieve_webpage(url=url, extract_text_only=True)
+        )
 
         webpage = result["webpage"]
         content = webpage.content[:8000]  # Limit content length

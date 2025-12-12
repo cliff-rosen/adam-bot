@@ -65,6 +65,7 @@ export default function MainPage() {
         isLoading,
         streamingText,
         statusText,
+        activeToolProgress,
         conversationId,
         conversations,
         isLoadingConversations,
@@ -688,6 +689,7 @@ export default function MainPage() {
                 isLoading={isLoading}
                 streamingText={streamingText}
                 statusText={statusText}
+                activeToolProgress={activeToolProgress}
                 onSendMessage={handleSendMessage}
                 onValueSelect={handleValueSelect}
                 onActionClick={handleActionClick}

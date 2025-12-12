@@ -21,7 +21,6 @@ The workflow is hardcoded but uses LLMs at decision points:
 
 import json
 import logging
-import asyncio
 import os
 from typing import Dict, Any, List, Optional, Generator
 from dataclasses import dataclass, field
@@ -29,6 +28,7 @@ from sqlalchemy.orm import Session
 import anthropic
 
 from tools.registry import ToolConfig, ToolResult, ToolProgress, register_tool
+from tools.executor import run_async
 
 logger = logging.getLogger(__name__)
 
@@ -384,14 +384,9 @@ class DeepResearchEngine:
                 # Skip remaining queries if quota exceeded
                 break
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    result = loop.run_until_complete(
-                        search_service.search(search_term=query, num_results=MAX_SEARCH_RESULTS)
-                    )
-                finally:
-                    loop.close()
+                result = run_async(
+                    search_service.search(search_term=query, num_results=MAX_SEARCH_RESULTS)
+                )
 
                 # Check if fallback was used (indicates quota issues)
                 metadata = result.get("metadata")
@@ -491,14 +486,9 @@ class DeepResearchEngine:
 
         for url in urls:
             try:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    result = loop.run_until_complete(
-                        service.retrieve_webpage(url=url, extract_text_only=True)
-                    )
-                finally:
-                    loop.close()
+                result = run_async(
+                    service.retrieve_webpage(url=url, extract_text_only=True)
+                )
 
                 webpage = result["webpage"]
                 content = webpage.content[:6000]  # Limit per page

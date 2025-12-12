@@ -1,11 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
-import { generalChatApi } from '../lib/api/generalChatApi';
+import { generalChatApi, ToolProgressPayload } from '../lib/api/generalChatApi';
 import { conversationApi, Conversation } from '../lib/api/conversationApi';
 import {
     GeneralChatMessage,
     InteractionType,
     ActionMetadata
 } from '../types/chat';
+
+export interface ActiveToolProgress {
+    toolName: string;
+    updates: ToolProgressPayload[];
+}
 
 interface UseGeneralChatOptions {
     initialContext?: Record<string, any>;
@@ -24,6 +29,9 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
     const [statusText, setStatusText] = useState<string | null>(null);
     const [conversationId, setConversationId] = useState<number | null>(null);
     const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+
+    // Tool progress tracking
+    const [activeToolProgress, setActiveToolProgress] = useState<ActiveToolProgress | null>(null);
 
     // Conversation list management
     const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -66,6 +74,7 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
         setError(null);
         setStreamingText('');
         setStatusText(null);
+        setActiveToolProgress(null);
 
         try {
             // Stream the response
@@ -85,8 +94,31 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
                     break;
                 }
 
-                // Handle status updates (e.g., "Thinking...", "Running web_search...")
-                if (chunk.status && chunk.status !== 'streaming' && chunk.status !== 'complete') {
+                // Handle tool progress updates
+                const toolPayload = chunk.payload as ToolProgressPayload | undefined;
+                const isToolProgressUpdate = toolPayload && 'tool' in toolPayload && 'phase' in toolPayload;
+
+                if (isToolProgressUpdate) {
+                    if (toolPayload.phase === 'started') {
+                        // Set the high-level status when tool starts
+                        setStatusText(`Running ${toolPayload.tool.replace(/_/g, ' ')}...`);
+                        setActiveToolProgress({ toolName: toolPayload.tool, updates: [] });
+                    } else if (toolPayload.phase === 'progress') {
+                        setActiveToolProgress(prev => {
+                            if (prev && prev.toolName === toolPayload.tool) {
+                                return { ...prev, updates: [...prev.updates, toolPayload] };
+                            }
+                            return { toolName: toolPayload.tool, updates: [toolPayload] };
+                        });
+                    } else if (toolPayload.phase === 'completed') {
+                        // Clear tool progress when completed
+                        setActiveToolProgress(null);
+                        setStatusText(null);
+                    }
+                }
+
+                // Handle status updates (e.g., "Thinking...") - but NOT when it's a tool progress update
+                if (chunk.status && chunk.status !== 'streaming' && chunk.status !== 'complete' && !isToolProgressUpdate) {
                     console.log('[useGeneralChat] Status update:', chunk.status);
                     setStatusText(chunk.status);
                 }
@@ -94,26 +126,29 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
                 // Handle token streaming - clear status only if it's a "Running" status (not "Completed")
                 if (chunk.token) {
                     setStatusText(prev => prev?.startsWith('Completed') ? prev : null);
+                    setActiveToolProgress(null);  // Clear tool progress when streaming text
                     collectedText += chunk.token;
                     setStreamingText(collectedText);
                 }
 
-                // Handle final payload
-                if (chunk.payload && chunk.status === 'complete') {
+                // Handle final payload (ChatResponsePayload, not ToolProgressPayload)
+                if (chunk.payload && chunk.status === 'complete' && 'message' in chunk.payload) {
+                    const responsePayload = chunk.payload;
+
                     // Update conversation ID if returned (new conversation was created)
-                    if (chunk.payload.conversation_id && chunk.payload.conversation_id !== conversationId) {
-                        setConversationId(chunk.payload.conversation_id);
+                    if (responsePayload.conversation_id && responsePayload.conversation_id !== conversationId) {
+                        setConversationId(responsePayload.conversation_id);
                         // Refresh conversation list to include the new conversation
                         conversationApi.list(50).then(convs => setConversations(convs)).catch(console.error);
                     }
 
                     const assistantMessage: GeneralChatMessage = {
                         role: 'assistant',
-                        content: chunk.payload.message,
+                        content: responsePayload.message,
                         timestamp: new Date().toISOString(),
-                        suggested_values: chunk.payload.suggested_values,
-                        suggested_actions: chunk.payload.suggested_actions,
-                        custom_payload: chunk.payload.custom_payload
+                        suggested_values: responsePayload.suggested_values,
+                        suggested_actions: responsePayload.suggested_actions,
+                        custom_payload: responsePayload.custom_payload
                     };
                     setMessages(prev => {
                         console.log('[setMessages] Adding assistant message, prev:', prev.length, prev.map(m => m.role));
@@ -123,8 +158,8 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
                     setStatusText(null);
 
                     // Notify about tool calls if any
-                    if (onToolCallsComplete && chunk.payload.custom_payload?.type === 'tool_history') {
-                        const toolCalls = chunk.payload.custom_payload.data as Array<{ tool_name: string }>;
+                    if (onToolCallsComplete && responsePayload.custom_payload?.type === 'tool_history') {
+                        const toolCalls = responsePayload.custom_payload.data as Array<{ tool_name: string }>;
                         const toolNames = toolCalls.map(tc => tc.tool_name);
                         onToolCallsComplete(toolNames);
                     }
@@ -235,6 +270,7 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
         error,
         streamingText,
         statusText,
+        activeToolProgress,
         // Conversation state
         conversationId,
         conversations,
