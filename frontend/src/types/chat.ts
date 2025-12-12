@@ -41,13 +41,67 @@ export interface ToolCall {
     output: string | Record<string, any>;
 }
 
-export type WorkspacePayloadType = 'draft' | 'summary' | 'data' | 'code' | 'plan';
+export type WorkspacePayloadType = 'draft' | 'summary' | 'data' | 'code' | 'plan' | 'wip';
 
 export interface WorkspacePayload {
     type: WorkspacePayloadType;
     title: string;
     content: string;
+    // Extended fields for plan payloads
+    goal?: string;
+    initial_input?: string;
+    steps?: WorkflowStepDefinition[];
+    // Extended fields for wip payloads
+    step_number?: number;
+    content_type?: 'document' | 'data' | 'code';
 }
+
+// ============================================================================
+// Workflow Types
+// ============================================================================
+
+export interface WorkflowPlan {
+    id: string;
+    title: string;
+    goal: string;
+    initial_input: string;
+    status: 'proposed' | 'active' | 'completed' | 'abandoned';
+    steps: WorkflowStep[];
+    created_at: string;
+}
+
+export interface WorkflowStep {
+    step_number: number;
+    description: string;
+    input_description: string;
+    input_source: 'user' | number;        // 'user' or step number
+    output_description: string;
+    method: StepMethod;
+    status: 'pending' | 'in_progress' | 'completed' | 'skipped';
+    wip_output?: WipOutput;
+}
+
+export interface WorkflowStepDefinition {
+    description: string;
+    input_description: string;
+    input_source: 'user' | number;
+    output_description: string;
+    method: StepMethod;
+}
+
+export interface StepMethod {
+    approach: string;
+    tools: string[];
+    reasoning: string;
+}
+
+export interface WipOutput {
+    title: string;
+    content: string;
+    content_type: 'document' | 'data' | 'code';
+}
+
+const VALID_PAYLOAD_TYPES = ['draft', 'summary', 'data', 'code', 'plan', 'wip'];
 
 /**
  * Parse a workspace payload from message content.
@@ -59,7 +113,7 @@ export function parseWorkspacePayload(content: string): { text: string; payload:
     const patterns = [
         /```payload\s*\n([\s\S]*?)\n```/,      // ```payload\n...\n```
         /```payload\s+([\s\S]*?)```/,           // ```payload {...}```
-        /```json\s*\n(\{[\s\S]*?"type"\s*:\s*"(?:draft|summary|data|code|plan)"[\s\S]*?\})\n```/, // ```json with type field
+        /```json\s*\n(\{[\s\S]*?"type"\s*:\s*"(?:draft|summary|data|code|plan|wip)"[\s\S]*?\})\n```/, // ```json with type field
     ];
 
     for (const regex of patterns) {
@@ -70,14 +124,27 @@ export function parseWorkspacePayload(content: string): { text: string; payload:
             const payloadJson = match[1].trim();
             const payload = JSON.parse(payloadJson) as WorkspacePayload;
 
-            // Validate required fields
-            if (!payload.type || !payload.title || !payload.content) {
+            // Validate type is one of our known types
+            if (!payload.type || !VALID_PAYLOAD_TYPES.includes(payload.type)) {
                 continue;
             }
 
-            // Validate type is one of our known types
-            if (!['draft', 'summary', 'data', 'code', 'plan'].includes(payload.type)) {
-                continue;
+            // Validate required fields based on type
+            if (payload.type === 'plan') {
+                // Plan requires goal and steps
+                if (!payload.title || !payload.goal || !payload.steps) {
+                    continue;
+                }
+            } else if (payload.type === 'wip') {
+                // WIP requires step_number and content
+                if (!payload.title || !payload.content || payload.step_number === undefined) {
+                    continue;
+                }
+            } else {
+                // Standard payloads require title and content
+                if (!payload.title || !payload.content) {
+                    continue;
+                }
             }
 
             // Remove the payload block from the text

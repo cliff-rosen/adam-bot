@@ -4,10 +4,12 @@ import {
     LightBulbIcon, BookmarkIcon, Cog6ToothIcon,
     ArrowsPointingOutIcon, UserIcon, HeartIcon, BuildingOfficeIcon,
     FolderIcon, ClockIcon, XCircleIcon, CheckIcon, UserCircleIcon,
-    ChevronDownIcon, ChevronRightIcon, PencilIcon
+    ChevronDownIcon, ChevronRightIcon, PencilIcon, PlayIcon,
+    DocumentTextIcon
 } from '@heroicons/react/24/solid';
 import { CheckCircleIcon as CheckCircleOutlineIcon } from '@heroicons/react/24/outline';
 import { Memory, MemoryType, Asset, Profile } from '../../lib/api';
+import { WorkflowPlan } from '../../types/chat';
 
 // Available tools that can be enabled/disabled
 const AVAILABLE_TOOLS = [
@@ -23,6 +25,7 @@ interface ContextPanelProps {
     profile: Profile | null;
     enabledTools: Set<string>;
     includeProfile: boolean;
+    workflow: WorkflowPlan | null;
     onAddWorkingMemory: (content: string) => void;
     onToggleMemoryPinned: (memId: number) => void;
     onToggleAssetContext: (assetId: number) => void;
@@ -32,6 +35,8 @@ interface ContextPanelProps {
     onExpandMemories: () => void;
     onExpandAssets: () => void;
     onEditProfile: () => void;
+    onAbandonWorkflow: () => void;
+    onViewStepOutput: (stepNumber: number) => void;
 }
 
 // Helper to get memory type icon and color
@@ -58,6 +63,7 @@ export default function ContextPanel({
     profile,
     enabledTools,
     includeProfile,
+    workflow,
     onAddWorkingMemory,
     onToggleMemoryPinned,
     onToggleAssetContext,
@@ -66,7 +72,9 @@ export default function ContextPanel({
     onToggleProfile,
     onExpandMemories,
     onExpandAssets,
-    onEditProfile
+    onEditProfile,
+    onAbandonWorkflow,
+    onViewStepOutput
 }: ContextPanelProps) {
     const [newMemoryInput, setNewMemoryInput] = useState('');
 
@@ -114,7 +122,110 @@ export default function ContextPanel({
 
             {/* Panel Content */}
             <div className="flex-1 overflow-y-auto min-w-[280px]">
-                {/* TODO: Active Workflow Section (when workflow is active) */}
+                {/* Active Workflow Section */}
+                {workflow && workflow.status === 'active' && (
+                    <div className="border-b border-gray-200 dark:border-gray-700">
+                        <div className="px-4 py-3 bg-indigo-100 dark:bg-indigo-900/30">
+                            <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                    <PlayIcon className="h-4 w-4 text-indigo-600 dark:text-indigo-400" />
+                                    <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase">
+                                        Workflow
+                                    </span>
+                                </div>
+                                <button
+                                    onClick={onAbandonWorkflow}
+                                    className="p-1 text-gray-400 hover:text-red-500 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                                    title="Abandon workflow"
+                                >
+                                    <XMarkIcon className="h-4 w-4" />
+                                </button>
+                            </div>
+                        </div>
+                        <div className="p-3 space-y-2">
+                            {/* Workflow title */}
+                            <div className="text-sm font-medium text-gray-900 dark:text-white">
+                                {workflow.title}
+                            </div>
+
+                            {/* Steps list */}
+                            <div className="space-y-1.5">
+                                {workflow.steps.map((step) => {
+                                    const isCompleted = step.status === 'completed';
+                                    const isInProgress = step.status === 'in_progress';
+
+                                    return (
+                                        <div
+                                            key={step.step_number}
+                                            className={`flex items-start gap-2 px-2 py-1.5 rounded text-xs ${
+                                                isInProgress
+                                                    ? 'bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700'
+                                                    : isCompleted
+                                                        ? 'bg-green-50 dark:bg-green-900/20'
+                                                        : 'bg-gray-50 dark:bg-gray-800/50'
+                                            }`}
+                                        >
+                                            {/* Step number / status icon */}
+                                            <div className="flex-shrink-0 mt-0.5">
+                                                {isCompleted ? (
+                                                    <CheckIcon className="h-3.5 w-3.5 text-green-500" />
+                                                ) : isInProgress ? (
+                                                    <div className="h-3.5 w-3.5 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
+                                                ) : (
+                                                    <span className="inline-flex items-center justify-center h-3.5 w-3.5 text-[10px] font-medium text-gray-400 rounded-full border border-gray-300 dark:border-gray-600">
+                                                        {step.step_number}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* Step description */}
+                                            <div className="flex-1 min-w-0">
+                                                <span className={`${
+                                                    isCompleted
+                                                        ? 'text-green-700 dark:text-green-300'
+                                                        : isInProgress
+                                                            ? 'text-indigo-700 dark:text-indigo-300 font-medium'
+                                                            : 'text-gray-500 dark:text-gray-400'
+                                                }`}>
+                                                    {step.description}
+                                                </span>
+                                            </div>
+
+                                            {/* View output button for completed steps */}
+                                            {isCompleted && step.wip_output && (
+                                                <button
+                                                    onClick={() => onViewStepOutput(step.step_number)}
+                                                    className="flex-shrink-0 text-indigo-500 hover:text-indigo-600 dark:text-indigo-400"
+                                                    title="View output"
+                                                >
+                                                    <DocumentTextIcon className="h-3.5 w-3.5" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Progress indicator */}
+                            <div className="pt-2">
+                                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                    <span>Progress</span>
+                                    <span>
+                                        {workflow.steps.filter(s => s.status === 'completed').length}/{workflow.steps.length}
+                                    </span>
+                                </div>
+                                <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-indigo-500 rounded-full transition-all"
+                                        style={{
+                                            width: `${(workflow.steps.filter(s => s.status === 'completed').length / workflow.steps.length) * 100}%`
+                                        }}
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
 
                 {/* Assets Section */}
                 <div className="border-b border-gray-200 dark:border-gray-700">

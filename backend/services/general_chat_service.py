@@ -313,7 +313,7 @@ class GeneralChatService:
         }}
         ```
 
-        **Payload types and when to use them:**
+        **Standard Payload types:**
 
         - `draft` - For any written content the user might want to iterate on: emails, letters, documents, messages, blog posts, code, etc. The user can edit these directly in the workspace.
 
@@ -322,8 +322,6 @@ class GeneralChatService:
         - `data` - For structured data like weather, statistics, comparisons, lists of items with properties, etc. Format the content as a readable summary.
 
         - `code` - For code snippets, scripts, or technical implementations. The user can copy or save these easily.
-
-        - `plan` - For action plans, step-by-step instructions, or project outlines.
 
         **Examples:**
 
@@ -339,7 +337,120 @@ class GeneralChatService:
         - Provide brief commentary
         - Include a `summary` payload with the bullet points
 
-        **Important:**
+        ## Workflow Plans
+
+        For complex, multi-step tasks that require a structured approach, you can propose a **workflow plan**. Workflows are chains of steps where each step has an input, a method (how you'll accomplish it), and an output. The user reviews and approves each step's output before you proceed to the next.
+
+        **When to propose a workflow:**
+        - Tasks requiring multiple distinct phases (research → analyze → create)
+        - Complex deliverables that need iteration
+        - Projects where the user wants visibility into your process
+        - Tasks where intermediate outputs might need user feedback
+
+        **Plan payload format:**
+
+        ```payload
+        {{
+        "type": "plan",
+        "title": "<workflow title>",
+        "goal": "<what the workflow will achieve>",
+        "initial_input": "<what the user is providing to start>",
+        "steps": [
+            {{
+            "description": "<what this step does>",
+            "input_description": "<what this step takes as input>",
+            "input_source": "user" | <step_number>,
+            "output_description": "<what this step produces>",
+            "method": {{
+                "approach": "<how you'll accomplish this>",
+                "tools": ["<tool1>", "<tool2>"],
+                "reasoning": "<why this approach>"
+            }}
+            }}
+        ]
+        }}
+        ```
+
+        **input_source** indicates where this step gets its input:
+        - `"user"` - The initial input provided by the user
+        - `<step_number>` (integer) - The output from a previous step (e.g., 1, 2, 3)
+
+        **Example workflow plan:**
+
+        User: "Research the top 5 AI companies and create a comparison report"
+
+        ```payload
+        {{
+        "type": "plan",
+        "title": "AI Companies Comparison Report",
+        "goal": "Create a comprehensive comparison of the top 5 AI companies",
+        "initial_input": "User request for AI company comparison",
+        "steps": [
+            {{
+            "description": "Research and identify the top 5 AI companies",
+            "input_description": "User's criteria for 'top' AI companies",
+            "input_source": "user",
+            "output_description": "List of 5 companies with brief profiles",
+            "method": {{
+                "approach": "Web search for AI company rankings and analysis",
+                "tools": ["web_search"],
+                "reasoning": "Need current information on market leaders"
+            }}
+            }},
+            {{
+            "description": "Deep dive on each company",
+            "input_description": "The 5 identified companies",
+            "input_source": 1,
+            "output_description": "Detailed profiles for each company",
+            "method": {{
+                "approach": "Research each company's products, funding, and recent news",
+                "tools": ["web_search", "fetch_webpage"],
+                "reasoning": "Need comprehensive data for fair comparison"
+            }}
+            }},
+            {{
+            "description": "Create comparison report",
+            "input_description": "Detailed company profiles",
+            "input_source": 2,
+            "output_description": "Formatted comparison document",
+            "method": {{
+                "approach": "Synthesize research into structured comparison",
+                "tools": [],
+                "reasoning": "Analysis and writing based on gathered data"
+            }}
+            }}
+        ]
+        }}
+        ```
+
+        ## Executing Workflow Steps (WIP Outputs)
+
+        When the user accepts a plan and asks you to execute a step, send your output as a **wip (work-in-progress)** payload. The user will review and either accept, request changes, or reject each step's output.
+
+        **WIP payload format:**
+
+        ```payload
+        {{
+        "type": "wip",
+        "title": "<output title>",
+        "content": "<the step's output>",
+        "step_number": <which step this is for>,
+        "content_type": "document" | "data" | "code"
+        }}
+        ```
+
+        **Responding to workflow actions:**
+
+        When you receive an action like `workflow_step_start`:
+        1. Execute the step as described in the plan
+        2. Use any available tools as needed
+        3. Send the output as a `wip` payload
+        4. Wait for user approval before proceeding
+
+        When you receive `workflow_step_revise` or `workflow_step_redo`:
+        - Revise the output based on feedback and send a new `wip` payload
+
+        **Important payload notes:**
         - Only include ONE payload per response
         - The payload must be valid JSON inside the code block
         - Always provide some conversational text BEFORE the payload

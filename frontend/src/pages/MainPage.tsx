@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '@heroicons/react/24/solid';
 import { useGeneralChat } from '../hooks/useGeneralChat';
 import { useProfile } from '../context/ProfileContext';
-import { InteractionType, ToolCall, GeneralChatMessage, WorkspacePayload } from '../types/chat';
-import { memoryApi, Memory, assetApi, Asset, AssetUpdate, profileApi } from '../lib/api';
+import { InteractionType, ToolCall, GeneralChatMessage, WorkspacePayload, WorkflowPlan, WorkflowStep, WorkflowStepDefinition } from '../types/chat';
+import { memoryApi, Memory, assetApi, Asset, AssetUpdate } from '../lib/api';
 import {
     ConversationSidebar,
     ChatPanel,
@@ -28,7 +28,7 @@ const MIN_WORKSPACE_WIDTH = 200;
  */
 export default function MainPage() {
     const navigate = useNavigate();
-    const { userProfile, setUserProfile } = useProfile();
+    const { userProfile } = useProfile();
 
     // Agent control state (defined first as hook depends on it)
     const [enabledTools, setEnabledTools] = useState<Set<string>>(
@@ -90,6 +90,9 @@ export default function MainPage() {
     const [selectedToolHistory, setSelectedToolHistory] = useState<ToolCall[] | null>(null);
     const [activePayload, setActivePayload] = useState<WorkspacePayload | null>(null);
 
+    // Workflow state
+    const [activeWorkflow, setActiveWorkflow] = useState<WorkflowPlan | null>(null);
+
     const containerRef = useRef<HTMLDivElement>(null);
 
     // Handle divider drag
@@ -129,24 +132,22 @@ export default function MainPage() {
         };
     }, [isDragging, isSidebarOpen, isContextPanelOpen]);
 
-    // Load memories, assets, and profile on mount
+    // Load memories and assets on mount (profile is loaded by ProfileContext)
     useEffect(() => {
         const loadData = async () => {
             try {
-                const [mems, assts, prof] = await Promise.all([
+                const [mems, assts] = await Promise.all([
                     memoryApi.list(),
-                    assetApi.list(),
-                    profileApi.get()
+                    assetApi.list()
                 ]);
                 setMemories(mems);
                 setAssets(assts);
-                setUserProfile(prof);
             } catch (err) {
                 console.error('Failed to load data:', err);
             }
         };
         loadData();
-    }, [setUserProfile]);
+    }, []);
 
     // Conversation handlers
     const handleNewConversation = async () => {
@@ -377,6 +378,181 @@ export default function MainPage() {
         setActivePayload(null);
     };
 
+    // Workflow handlers
+    const handleAcceptPlan = useCallback((payload: WorkspacePayload) => {
+        if (payload.type !== 'plan' || !payload.steps) return;
+
+        // Convert payload steps to workflow steps with status
+        const workflowSteps: WorkflowStep[] = payload.steps.map((step: WorkflowStepDefinition, idx: number) => ({
+            step_number: idx + 1,
+            description: step.description,
+            input_description: step.input_description,
+            input_source: step.input_source,
+            output_description: step.output_description,
+            method: step.method,
+            status: idx === 0 ? 'in_progress' : 'pending'
+        }));
+
+        // Create the workflow plan
+        const workflow: WorkflowPlan = {
+            id: `workflow_${Date.now()}`,
+            title: payload.title,
+            goal: payload.goal || '',
+            initial_input: payload.initial_input || '',
+            status: 'active',
+            steps: workflowSteps,
+            created_at: new Date().toISOString()
+        };
+
+        setActiveWorkflow(workflow);
+        setActivePayload(null);
+
+        // Send message to start executing the first step
+        sendMessage(
+            `Plan accepted. Please execute step 1: ${workflowSteps[0].description}`,
+            InteractionType.ACTION_EXECUTED,
+            {
+                action_identifier: 'workflow_step_start',
+                action_data: {
+                    workflow_id: workflow.id,
+                    step_number: 1,
+                    step: workflowSteps[0]
+                }
+            }
+        );
+    }, [sendMessage]);
+
+    const handleRejectPlan = useCallback(() => {
+        setActivePayload(null);
+        sendMessage(
+            'I\'d like to revise this plan. Let\'s discuss adjustments.',
+            InteractionType.TEXT_INPUT
+        );
+    }, [sendMessage]);
+
+    const handleAcceptWip = useCallback((payload: WorkspacePayload) => {
+        if (!activeWorkflow || payload.step_number === undefined) return;
+
+        const stepNumber = payload.step_number;
+        const updatedSteps = activeWorkflow.steps.map(step => {
+            if (step.step_number === stepNumber) {
+                return {
+                    ...step,
+                    status: 'completed' as const,
+                    wip_output: {
+                        title: payload.title,
+                        content: payload.content,
+                        content_type: payload.content_type || 'document'
+                    }
+                };
+            } else if (step.step_number === stepNumber + 1) {
+                return { ...step, status: 'in_progress' as const };
+            }
+            return step;
+        });
+
+        const allCompleted = updatedSteps.every(s => s.status === 'completed');
+
+        setActiveWorkflow({
+            ...activeWorkflow,
+            steps: updatedSteps,
+            status: allCompleted ? 'completed' : 'active'
+        });
+        setActivePayload(null);
+
+        if (allCompleted) {
+            // Workflow complete - save final output as asset
+            const lastStep = updatedSteps[updatedSteps.length - 1];
+            if (lastStep.wip_output) {
+                handleSavePayloadAsAsset({
+                    type: lastStep.wip_output.content_type === 'code' ? 'code' : 'draft',
+                    title: lastStep.wip_output.title,
+                    content: lastStep.wip_output.content
+                }, true);
+            }
+            sendMessage(
+                'Workflow completed successfully! The final output has been saved as an asset.',
+                InteractionType.TEXT_INPUT
+            );
+        } else {
+            // Move to next step
+            const nextStep = updatedSteps.find(s => s.status === 'in_progress');
+            if (nextStep) {
+                sendMessage(
+                    `Step ${stepNumber} accepted. Please execute step ${nextStep.step_number}: ${nextStep.description}`,
+                    InteractionType.ACTION_EXECUTED,
+                    {
+                        action_identifier: 'workflow_step_start',
+                        action_data: {
+                            workflow_id: activeWorkflow.id,
+                            step_number: nextStep.step_number,
+                            step: nextStep,
+                            previous_output: payload.content
+                        }
+                    }
+                );
+            }
+        }
+    }, [activeWorkflow, sendMessage, handleSavePayloadAsAsset]);
+
+    const handleEditWip = useCallback((payload: WorkspacePayload) => {
+        // Request changes to the current WIP output
+        sendMessage(
+            `Please revise this output. Here are my suggestions: [User can edit the content in the workspace and provide feedback]`,
+            InteractionType.ACTION_EXECUTED,
+            {
+                action_identifier: 'workflow_step_revise',
+                action_data: {
+                    workflow_id: activeWorkflow?.id,
+                    step_number: payload.step_number,
+                    current_content: payload.content
+                }
+            }
+        );
+    }, [activeWorkflow, sendMessage]);
+
+    const handleRejectWip = useCallback(() => {
+        if (!activeWorkflow) return;
+
+        const currentStep = activeWorkflow.steps.find(s => s.status === 'in_progress');
+        if (currentStep) {
+            sendMessage(
+                `Please redo step ${currentStep.step_number}: ${currentStep.description}. The previous output wasn't satisfactory.`,
+                InteractionType.ACTION_EXECUTED,
+                {
+                    action_identifier: 'workflow_step_redo',
+                    action_data: {
+                        workflow_id: activeWorkflow.id,
+                        step_number: currentStep.step_number,
+                        step: currentStep
+                    }
+                }
+            );
+        }
+        setActivePayload(null);
+    }, [activeWorkflow, sendMessage]);
+
+    const handleAbandonWorkflow = useCallback(() => {
+        setActiveWorkflow(prev => prev ? { ...prev, status: 'abandoned' } : null);
+        setActiveWorkflow(null);
+        sendMessage(
+            'Workflow abandoned. What would you like to do next?',
+            InteractionType.TEXT_INPUT
+        );
+    }, [sendMessage]);
+
+    const handleViewStepOutput = useCallback((stepNumber: number) => {
+        if (!activeWorkflow) return;
+        const step = activeWorkflow.steps.find(s => s.step_number === stepNumber);
+        if (step?.wip_output) {
+            setActivePayload({
+                type: step.wip_output.content_type === 'code' ? 'code' : 'draft',
+                title: step.wip_output.title,
+                content: step.wip_output.content
+            });
+        }
+    }, [activeWorkflow]);
+
     return (
         <div ref={containerRef} className={`flex h-full ${isDragging ? 'select-none' : ''}`}>
             {/* Left Sidebar - Conversation List (Collapsible) */}
@@ -461,6 +637,11 @@ export default function MainPage() {
                     onSaveAsAsset={handleSaveToolOutputAsAsset}
                     onSavePayloadAsAsset={handleSavePayloadAsAsset}
                     onPayloadEdit={handlePayloadEdit}
+                    onAcceptPlan={handleAcceptPlan}
+                    onRejectPlan={handleRejectPlan}
+                    onAcceptWip={handleAcceptWip}
+                    onEditWip={handleEditWip}
+                    onRejectWip={handleRejectWip}
                 />
             </div>
 
@@ -489,6 +670,7 @@ export default function MainPage() {
                     profile={userProfile}
                     enabledTools={enabledTools}
                     includeProfile={includeProfile}
+                    workflow={activeWorkflow}
                     onAddWorkingMemory={handleAddWorkingMemory}
                     onToggleMemoryPinned={handleToggleMemoryPinned}
                     onToggleAssetContext={handleToggleAssetContext}
@@ -498,6 +680,8 @@ export default function MainPage() {
                     onExpandMemories={() => setIsMemoryModalOpen(true)}
                     onExpandAssets={() => setIsAssetModalOpen(true)}
                     onEditProfile={handleEditProfile}
+                    onAbandonWorkflow={handleAbandonWorkflow}
+                    onViewStepOutput={handleViewStepOutput}
                 />
             </div>
 
