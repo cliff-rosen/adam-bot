@@ -23,12 +23,12 @@ import json
 import logging
 import asyncio
 import os
-from typing import Dict, Any, List, Optional, Generator, Union
-from dataclasses import dataclass, field, asdict
+from typing import Dict, Any, List, Optional, Generator
+from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 import anthropic
 
-from .registry import ToolConfig, ToolResult, ToolProgress, register_tool
+from tools.registry import ToolConfig, ToolResult, ToolProgress, register_tool
 
 logger = logging.getLogger(__name__)
 

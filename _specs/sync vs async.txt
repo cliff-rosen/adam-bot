@@ -1,0 +1,73 @@
+> We seem to have this async code with loops and stuff to control going from sync to async
+methods, or the other way around. Can you explain to me why this is necessary? Why can't all of
+ our methods, for example, be sync? dont change just explain
+
+● The async/sync mixing in this codebase exists because of two conflicting requirements:
+
+  The Core Tension
+
+  1. HTTP/Network I/O wants to be async
+
+  The Anthropic API client, aiohttp for web requests, and FastAPI's SSE streaming all work best
+   with async. Async lets you:
+  - Make multiple HTTP requests concurrently without threads
+  - Stream responses without blocking
+  - Handle many concurrent users efficiently
+
+  2. The tool executor interface is sync
+
+  Your tools are designed with a simple sync signature:
+  def executor(params, db, user_id, context) -> ToolResult
+
+  This makes tools easy to write - no async def, no await, just regular Python.
+
+  Why Not Make Everything Sync?
+
+  You could make everything sync, but you'd lose significant benefits:
+
+  1. Concurrent searches would require threads: In _execute_searches, you run 3 queries. With
+  async, these could run concurrently with asyncio.gather(). With sync, you'd need
+  ThreadPoolExecutor or run them sequentially (slower).
+  2. SSE streaming would block: FastAPI's StreamingResponse works naturally with async
+  generators. Sync would require more complex threading.
+  3. The Anthropic client is async-first: While there's a sync client, the async one integrates
+   better with FastAPI.
+
+  Why Not Make Everything Async?
+
+  You could make all tools async, but:
+
+  1. Tool authors need to understand async: Every tool would need async def and proper await
+  usage
+  2. Database sessions get tricky: SQLAlchemy sessions aren't naturally async (SQLAlchemy 2.0
+  has async, but it's more complex)
+  3. Simple tools become verbose: A tool that just formats data would still need async
+  boilerplate
+
+  The Bridge Pattern You're Using
+
+  The asyncio.to_thread() calls are the bridge:
+
+  # In async context, run sync tool in a thread pool
+  result = await asyncio.to_thread(tool_config.executor, ...)
+
+  And the reverse in tools:
+  # In sync tool, run async search
+  loop = asyncio.new_event_loop()
+  result = loop.run_until_complete(search_service.search(...))
+  loop.close()
+
+  This is a pragmatic compromise - async at the service layer (where concurrency matters), sync
+   at the tool layer (where simplicity matters).
+
+  The Ugly Part
+
+  The new_event_loop() pattern in tools like execute_web_search and _execute_searches is indeed
+   awkward. It's creating/destroying event loops repeatedly, which is inefficient. A cleaner
+  approach would be:
+
+  1. Make SearchService.search() have a sync wrapper, or
+  2. Pass an event loop through context, or
+  3. Use a single background event loop for all sync-to-async calls
+
+  But those add complexity. The current approach works, just with some overhead.

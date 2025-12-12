@@ -1,7 +1,8 @@
 """
-Shared utilities for tool execution.
+Tool Execution Utilities
 
-Contains common logic used by both step_execution_service and general_chat_service.
+Contains common logic used by both step_execution_service and general_chat_service
+for executing tools (both streaming and non-streaming).
 """
 
 import asyncio
@@ -9,7 +10,7 @@ import types
 import logging
 from typing import Any, Dict, AsyncGenerator, Tuple, Union
 
-from services.chat_payloads import ToolResult, ToolProgress, ToolConfig
+from tools.registry import ToolResult, ToolProgress, ToolConfig
 
 logger = logging.getLogger(__name__)
 

@@ -1,7 +1,8 @@
 """
-Chat Tools Package for CMR Bot
+Tools Package for CMR Bot
 
 This package contains the tool registry and built-in tools for the primary agent.
+Tools are capabilities the agent can invoke during conversations.
 """
 
 from .registry import (
@@ -15,9 +16,15 @@ from .registry import (
     get_tools_for_anthropic
 )
 
-from .tools import register_builtin_tools
+from .executor import (
+    execute_tool,
+    execute_streaming_tool
+)
+
+from .builtin import register_all_builtin_tools
 
 __all__ = [
+    # Registry types and functions
     'ToolConfig',
     'ToolResult',
     'ToolProgress',
@@ -26,5 +33,9 @@ __all__ = [
     'get_all_tools',
     'get_tools_by_category',
     'get_tools_for_anthropic',
-    'register_builtin_tools'
+    # Execution utilities
+    'execute_tool',
+    'execute_streaming_tool',
+    # Registration
+    'register_all_builtin_tools'
 ]

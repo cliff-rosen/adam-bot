@@ -6,7 +6,7 @@ from config import settings, setup_logging
 from middleware import LoggingMiddleware
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
-from services.chat_payloads import register_builtin_tools
+from tools import register_all_builtin_tools
 
 # Setup logging first
 logger, request_id_filter = setup_logging()
@@ -65,8 +65,8 @@ async def startup_event():
     logger.info("Application starting up...")
     init_db()
     logger.info("Database initialized")
-    register_builtin_tools()
-    logger.info("Chat tools registered")
+    register_all_builtin_tools()
+    logger.info("Tools registered")
 
 
 @app.get("/")

@@ -1,14 +1,14 @@
 """
-Built-in tools for CMR Bot primary agent.
+Search tools for CMR Bot primary agent.
 
-These tools are registered at startup and available to the agent at all times.
+Includes web search and webpage fetching capabilities.
 """
 
 import logging
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 
-from .registry import ToolConfig, ToolResult, register_tool
+from tools.registry import ToolConfig, ToolResult, register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def execute_web_search(
 
     except SearchQuotaExceededError as e:
         logger.warning(f"Search quota exceeded: {e}")
-        return ToolResult(text=f"Search quota exceeded. The search API limit has been reached. Please try again later or use fewer searches.")
+        return ToolResult(text="Search quota exceeded. The search API limit has been reached. Please try again later or use fewer searches.")
     except SearchAPIError as e:
         logger.error(f"Search API error: {e}")
         return ToolResult(text=f"Search failed: {str(e)}")
@@ -192,18 +192,8 @@ FETCH_WEBPAGE_TOOL = ToolConfig(
 # Tool Registration
 # =============================================================================
 
-def register_builtin_tools():
-    """Register all built-in tools. Called at startup."""
-    # Search tools
+def register_search_tools():
+    """Register all search tools."""
     register_tool(WEB_SEARCH_TOOL)
     register_tool(FETCH_WEBPAGE_TOOL)
-
-    # Research tools (high-level orchestrated workflows)
-    from .research_tool import register_research_tools
-    register_research_tools()
-
-    # Memory tools
-    from .memory_tools import register_memory_tools
-    register_memory_tools()
-
-    logger.info("Registered all built-in tools")
+    logger.info("Registered 2 search tools")

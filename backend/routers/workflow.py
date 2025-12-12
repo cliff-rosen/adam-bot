@@ -14,7 +14,7 @@ import asyncio
 
 from database import get_db
 from services.step_execution_service import StepExecutionService, StepAssignment
-from services.chat_payloads import get_all_tools
+from tools import get_all_tools
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 

@@ -11,7 +11,7 @@ import logging
 from typing import Dict, Any
 from sqlalchemy.orm import Session
 
-from .registry import ToolConfig, ToolResult, register_tool
+from tools.registry import ToolConfig, ToolResult, register_tool
 from services.memory_service import MemoryService
 from models import MemoryType
 
@@ -373,7 +373,7 @@ LIST_MEMORIES_TOOL = ToolConfig(
 # =============================================================================
 
 def register_memory_tools():
-    """Register all memory tools. Called at startup."""
+    """Register all memory tools."""
     register_tool(SAVE_MEMORY_TOOL)
     register_tool(SEARCH_MEMORY_TOOL)
     register_tool(DELETE_MEMORY_TOOL)

@@ -5,8 +5,8 @@ Global registry of tools available to the primary agent.
 Tools are capabilities the agent can invoke regardless of UI state.
 """
 
-from typing import Dict, List, Any, Callable, Optional, Generator, Union
-from dataclasses import dataclass, field
+from typing import Dict, List, Any, Callable, Optional
+from dataclasses import dataclass
 from sqlalchemy.orm import Session
 
 
