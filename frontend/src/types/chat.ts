@@ -41,7 +41,7 @@ export interface ToolCall {
     output: string | Record<string, any>;
 }
 
-export type WorkspacePayloadType = 'draft' | 'summary' | 'data' | 'code' | 'plan' | 'wip';
+export type WorkspacePayloadType = 'draft' | 'summary' | 'data' | 'code' | 'plan' | 'wip' | 'final';
 
 export interface WorkspacePayload {
     type: WorkspacePayloadType;
@@ -54,6 +54,9 @@ export interface WorkspacePayload {
     // Extended fields for wip payloads
     step_number?: number;
     content_type?: 'document' | 'data' | 'code';
+    // Extended fields for final workflow output
+    workflow_title?: string;
+    steps_completed?: number;
 }
 
 // ============================================================================

@@ -550,16 +550,19 @@ export default function MainPage() {
         setActivePayload(null);
 
         if (allCompleted) {
-            // Workflow complete - save final output as asset
+            // Workflow complete - show final output for user review
             const lastStep = updatedSteps[updatedSteps.length - 1];
             if (lastStep.wip_output) {
-                handleSavePayloadAsAsset({
-                    type: lastStep.wip_output.content_type === 'code' ? 'code' : 'draft',
+                setActivePayload({
+                    type: 'final',
                     title: lastStep.wip_output.title,
-                    content: lastStep.wip_output.content
-                }, true);
+                    content: lastStep.wip_output.content,
+                    content_type: lastStep.wip_output.content_type as 'document' | 'data' | 'code',
+                    workflow_title: activeWorkflow.title,
+                    steps_completed: updatedSteps.length
+                });
             }
-            setActiveWorkflow(null);
+            // Keep workflow in state until user accepts/dismisses final output
         } else {
             // Execute next step via dedicated step agent
             const nextStep = updatedSteps.find(s => s.status === 'in_progress');
@@ -599,6 +602,24 @@ export default function MainPage() {
     }, [activeWorkflow, executeStep]);
 
     const handleAbandonWorkflow = useCallback(() => {
+        setActiveWorkflow(null);
+        setActivePayload(null);
+    }, []);
+
+    const handleAcceptFinal = useCallback((payload: WorkspacePayload) => {
+        // Save the final output as an asset
+        handleSavePayloadAsAsset({
+            type: payload.content_type === 'code' ? 'code' : 'draft',
+            title: payload.title,
+            content: payload.content
+        }, false);
+        // Clear workflow and payload
+        setActiveWorkflow(null);
+        setActivePayload(null);
+    }, [handleSavePayloadAsAsset]);
+
+    const handleDismissFinal = useCallback(() => {
+        // Just clear the workflow without saving
         setActiveWorkflow(null);
         setActivePayload(null);
     }, []);
@@ -709,6 +730,8 @@ export default function MainPage() {
                     onAcceptWip={handleAcceptWip}
                     onEditWip={handleEditWip}
                     onRejectWip={handleRejectWip}
+                    onAcceptFinal={handleAcceptFinal}
+                    onDismissFinal={handleDismissFinal}
                 />
             </div>
 
