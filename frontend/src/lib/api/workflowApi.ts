@@ -44,18 +44,46 @@ export const workflowApi = {
         try {
             const rawStream = makeStreamRequest('/workflow/execute-step', request, 'POST');
 
-            for await (const update of rawStream) {
-                const lines = update.data.split('\n');
-                for (const line of lines) {
-                    if (!line.trim()) continue;
+            // Buffer for incomplete SSE messages (chunks may not align with message boundaries)
+            let buffer = '';
 
+            for await (const update of rawStream) {
+                buffer += update.data;
+
+                // SSE messages are separated by double newlines
+                const messages = buffer.split('\n\n');
+
+                // Keep the last incomplete message in the buffer
+                buffer = messages.pop() || '';
+
+                for (const message of messages) {
+                    if (!message.trim()) continue;
+
+                    // Parse SSE data lines
+                    for (const line of message.split('\n')) {
+                        if (line.startsWith('data: ')) {
+                            const jsonStr = line.slice(6);
+                            try {
+                                const data: StepStatusUpdate = JSON.parse(jsonStr);
+                                yield data;
+                            } catch (e) {
+                                console.error('Failed to parse stream data:', jsonStr, e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Process any remaining data in buffer
+            if (buffer.trim()) {
+                for (const line of buffer.split('\n')) {
                     if (line.startsWith('data: ')) {
                         const jsonStr = line.slice(6);
                         try {
                             const data: StepStatusUpdate = JSON.parse(jsonStr);
                             yield data;
                         } catch (e) {
-                            console.error('Failed to parse stream data:', jsonStr, e);
+                            console.error('Failed to parse remaining stream data:', jsonStr, e);
                         }
                     }
                 }
