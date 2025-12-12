@@ -8,18 +8,11 @@ import {
     DocumentTextIcon
 } from '@heroicons/react/24/solid';
 import { CheckCircleIcon as CheckCircleOutlineIcon } from '@heroicons/react/24/outline';
-import { Memory, MemoryType, Asset, Profile } from '../../lib/api';
+import { Memory, MemoryType, Asset, Profile, ToolInfo } from '../../lib/api';
 import { WorkflowPlan } from '../../types/chat';
 
-// Available tools that can be enabled/disabled
-const AVAILABLE_TOOLS = [
-    { id: 'web_search', name: 'Web Search', description: 'Search the web for information' },
-    { id: 'fetch_webpage', name: 'Fetch Webpage', description: 'Retrieve content from URLs' },
-    { id: 'save_memory', name: 'Save Memory', description: 'Save information to memory' },
-    { id: 'search_memory', name: 'Search Memory', description: 'Search saved memories' },
-];
-
 interface ContextPanelProps {
+    availableTools: ToolInfo[];
     memories: Memory[];
     assets: Asset[];
     profile: Profile | null;
@@ -58,6 +51,7 @@ const getMemoryTypeInfo = (type: MemoryType) => {
 };
 
 export default function ContextPanel({
+    availableTools,
     memories,
     assets,
     profile,
@@ -339,22 +333,23 @@ export default function ContextPanel({
                             <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
                                 Tools
                             </span>
-                            <span className="text-xs text-gray-500">({enabledToolCount}/{AVAILABLE_TOOLS.length})</span>
+                            <span className="text-xs text-gray-500">({enabledToolCount}/{availableTools.length})</span>
                         </button>
                     </div>
                     {isToolsExpanded && (
                         <div className="p-2 space-y-1">
-                            {AVAILABLE_TOOLS.map(tool => {
-                                const isEnabled = enabledTools.has(tool.id);
+                            {availableTools.map(tool => {
+                                const isEnabled = enabledTools.has(tool.name);
                                 return (
                                     <button
-                                        key={tool.id}
-                                        onClick={() => onToggleTool(tool.id)}
+                                        key={tool.name}
+                                        onClick={() => onToggleTool(tool.name)}
                                         className={`w-full flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors ${
                                             isEnabled
                                                 ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300'
                                                 : 'text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'
                                         }`}
+                                        title={tool.description}
                                     >
                                         {isEnabled ? (
                                             <CheckIcon className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
@@ -362,6 +357,9 @@ export default function ContextPanel({
                                             <CheckCircleOutlineIcon className="h-3.5 w-3.5 flex-shrink-0" />
                                         )}
                                         <span className="flex-1 text-left">{tool.name}</span>
+                                        {tool.category !== 'general' && (
+                                            <span className="text-[10px] text-gray-400 dark:text-gray-500">{tool.category}</span>
+                                        )}
                                     </button>
                                 );
                             })}

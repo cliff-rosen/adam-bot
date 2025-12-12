@@ -4,7 +4,7 @@ import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '@heroicons/react/24
 import { useGeneralChat } from '../hooks/useGeneralChat';
 import { useProfile } from '../context/ProfileContext';
 import { InteractionType, ToolCall, GeneralChatMessage, WorkspacePayload, WorkflowPlan, WorkflowStep, WorkflowStepDefinition } from '../types/chat';
-import { memoryApi, Memory, assetApi, Asset, AssetUpdate, workflowApi, StepStatusUpdate, ToolCallRecord } from '../lib/api';
+import { memoryApi, Memory, assetApi, Asset, AssetUpdate, workflowApi, StepStatusUpdate, ToolCallRecord, ToolInfo } from '../lib/api';
 import {
     ConversationSidebar,
     ChatPanel,
@@ -30,10 +30,11 @@ export default function MainPage() {
     const navigate = useNavigate();
     const { userProfile } = useProfile();
 
+    // Available tools from backend
+    const [availableTools, setAvailableTools] = useState<ToolInfo[]>([]);
+
     // Agent control state (defined first as hook depends on it)
-    const [enabledTools, setEnabledTools] = useState<Set<string>>(
-        new Set(['web_search', 'fetch_webpage', 'save_memory', 'search_memory'])
-    );
+    const [enabledTools, setEnabledTools] = useState<Set<string>>(new Set());
     const [includeProfile, setIncludeProfile] = useState(true);
 
     // Convert Set to array for the hook (memoized to avoid recreating on every render)
@@ -132,14 +133,18 @@ export default function MainPage() {
         };
     }, [isDragging, isSidebarOpen, isContextPanelOpen]);
 
-    // Load memories and assets on mount (profile is loaded by ProfileContext)
+    // Load tools, memories, and assets on mount (profile is loaded by ProfileContext)
     useEffect(() => {
         const loadData = async () => {
             try {
-                const [mems, assts] = await Promise.all([
+                const [tools, mems, assts] = await Promise.all([
+                    workflowApi.getTools(),
                     memoryApi.list(),
                     assetApi.list()
                 ]);
+                setAvailableTools(tools);
+                // Enable all tools by default
+                setEnabledTools(new Set(tools.map(t => t.name)));
                 setMemories(mems);
                 setAssets(assts);
             } catch (err) {
@@ -708,6 +713,7 @@ export default function MainPage() {
                 } overflow-hidden`}
             >
                 <ContextPanel
+                    availableTools={availableTools}
                     memories={memories}
                     assets={assets}
                     profile={userProfile}

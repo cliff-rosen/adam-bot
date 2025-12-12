@@ -2,17 +2,19 @@
 Workflow API Router
 
 Handles workflow step execution via dedicated step agent with SSE streaming.
+Also provides tool registry endpoints.
 """
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import asyncio
 
 from database import get_db
 from services.step_execution_service import StepExecutionService, StepAssignment
+from services.chat_payloads import get_all_tools
 
 router = APIRouter(prefix="/workflow", tags=["workflow"])
 
@@ -62,3 +64,28 @@ async def execute_step(
             "X-Accel-Buffering": "no"
         }
     )
+
+
+# =============================================================================
+# Tool Registry Endpoints
+# =============================================================================
+
+class ToolInfo(BaseModel):
+    """Tool information for frontend."""
+    name: str
+    description: str
+    category: str
+
+
+@router.get("/tools", response_model=List[ToolInfo])
+async def list_tools():
+    """Get all available tools."""
+    tools = get_all_tools()
+    return [
+        ToolInfo(
+            name=t.name,
+            description=t.description,
+            category=t.category
+        )
+        for t in tools
+    ]

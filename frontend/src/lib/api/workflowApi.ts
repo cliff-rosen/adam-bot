@@ -2,6 +2,7 @@
  * Workflow API - Step execution via dedicated agent with SSE streaming
  */
 
+import { api } from './index';
 import { makeStreamRequest } from './streamUtils';
 
 export interface StepExecutionRequest {
@@ -35,7 +36,20 @@ export interface StepStatusUpdate {
     result?: StepExecutionResult;
 }
 
+export interface ToolInfo {
+    name: string;
+    description: string;
+    category: string;
+}
+
 export const workflowApi = {
+    /**
+     * Get all available tools from the backend.
+     */
+    async getTools(): Promise<ToolInfo[]> {
+        const response = await api.get('/workflow/tools');
+        return response.data;
+    },
     /**
      * Execute a workflow step with SSE streaming for status updates.
      * Yields status updates as they arrive, final update contains result.
