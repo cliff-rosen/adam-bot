@@ -185,6 +185,10 @@ def register_builtin_tools():
     register_tool(WEB_SEARCH_TOOL)
     register_tool(FETCH_WEBPAGE_TOOL)
 
+    # Research tools (high-level orchestrated workflows)
+    from .research_tool import register_research_tools
+    register_research_tools()
+
     # Memory tools
     from .memory_tools import register_memory_tools
     register_memory_tools()
