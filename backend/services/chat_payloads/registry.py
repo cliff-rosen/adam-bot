@@ -5,9 +5,18 @@ Global registry of tools available to the primary agent.
 Tools are capabilities the agent can invoke regardless of UI state.
 """
 
-from typing import Dict, List, Any, Callable, Optional
-from dataclasses import dataclass
+from typing import Dict, List, Any, Callable, Optional, Generator, Union
+from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
+
+
+@dataclass
+class ToolProgress:
+    """Progress update from a streaming tool."""
+    stage: str  # Current stage name (e.g., "creating_checklist", "searching")
+    message: str  # Human-readable status message
+    data: Optional[Dict[str, Any]] = None  # Optional structured data for UI
+    progress: Optional[float] = None  # Optional 0-1 progress indicator
 
 
 @dataclass
@@ -24,8 +33,9 @@ class ToolConfig:
     description: str  # Description for the LLM
     input_schema: Dict[str, Any]  # JSON schema for tool parameters
     executor: Callable[[Dict[str, Any], Session, int, Dict[str, Any]], Any]
-    # executor signature: (params, db, user_id, context) -> str | ToolResult
+    # executor signature: (params, db, user_id, context) -> str | ToolResult | Generator[ToolProgress, None, ToolResult]
     category: str = "general"  # Tool category for organization
+    streaming: bool = False  # If True, executor yields ToolProgress before returning ToolResult
 
 
 class ToolRegistry:

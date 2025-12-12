@@ -4,7 +4,7 @@ import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '@heroicons/react/24
 import { useGeneralChat } from '../hooks/useGeneralChat';
 import { useProfile } from '../context/ProfileContext';
 import { InteractionType, ToolCall, GeneralChatMessage, WorkspacePayload, WorkflowPlan, WorkflowStep, WorkflowStepDefinition } from '../types/chat';
-import { memoryApi, Memory, assetApi, Asset, AssetUpdate, workflowApi, StepStatusUpdate, ToolCallRecord, ToolInfo } from '../lib/api';
+import { memoryApi, Memory, assetApi, Asset, AssetUpdate, workflowApi, StepStatusUpdate, ToolCallRecord, ToolInfo, ToolProgressUpdate } from '../lib/api';
 import {
     ConversationSidebar,
     ChatPanel,
@@ -387,6 +387,8 @@ export default function MainPage() {
     const [executingStep, setExecutingStep] = useState<WorkflowStep | null>(null);
     const [stepStatus, setStepStatus] = useState<string>('');
     const [stepToolCalls, setStepToolCalls] = useState<ToolCallRecord[]>([]);
+    const [currentToolProgress, setCurrentToolProgress] = useState<ToolProgressUpdate[]>([]);
+    const [currentToolName, setCurrentToolName] = useState<string | null>(null);
 
     // Helper to execute a step via dedicated step agent with streaming
     const executeStep = useCallback(async (
@@ -397,6 +399,8 @@ export default function MainPage() {
         setExecutingStep(step);
         setStepStatus('Starting...');
         setStepToolCalls([]);
+        setCurrentToolProgress([]);
+        setCurrentToolName(null);
         setActivePayload(null);
 
         try {
@@ -412,13 +416,26 @@ export default function MainPage() {
                 // Update status message
                 setStepStatus(update.message);
 
-                // Track tool calls
+                // Track tool start - reset progress for new tool
+                if (update.status === 'tool_start' && update.tool_name) {
+                    setCurrentToolName(update.tool_name);
+                    setCurrentToolProgress([]);
+                }
+
+                // Track tool progress updates
+                if (update.status === 'tool_progress' && update.tool_progress) {
+                    setCurrentToolProgress(prev => [...prev, update.tool_progress!]);
+                }
+
+                // Track tool completion - add to tool calls list with accumulated progress
                 if (update.status === 'tool_complete' && update.tool_name) {
                     setStepToolCalls(prev => [...prev, {
                         tool_name: update.tool_name!,
                         input: update.tool_input || {},
                         output: update.tool_output || ''
                     }]);
+                    // Keep progress visible briefly, then clear
+                    setCurrentToolName(null);
                 }
 
                 // Capture final result
@@ -681,6 +698,8 @@ export default function MainPage() {
                     executingStep={executingStep}
                     stepStatus={stepStatus}
                     stepToolCalls={stepToolCalls}
+                    currentToolName={currentToolName}
+                    currentToolProgress={currentToolProgress}
                     onClose={handleWorkspaceClose}
                     onSaveAsAsset={handleSaveToolOutputAsAsset}
                     onSavePayloadAsAsset={handleSavePayloadAsAsset}

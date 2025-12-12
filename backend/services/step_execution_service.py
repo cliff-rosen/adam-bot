@@ -5,7 +5,7 @@ A lightweight agent that executes individual workflow steps with fresh context.
 Streams status updates via SSE for real-time feedback.
 """
 
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Dict, Any, List, Optional, AsyncGenerator, Generator
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 import anthropic
@@ -13,8 +13,9 @@ import asyncio
 import os
 import logging
 import json
+import types
 
-from services.chat_payloads import get_all_tools, ToolResult
+from services.chat_payloads import get_all_tools, ToolResult, ToolProgress
 
 logger = logging.getLogger(__name__)
 
@@ -52,13 +53,24 @@ class StepResult:
 
 
 @dataclass
+class ToolProgressUpdate:
+    """Progress update from within a streaming tool."""
+    stage: str
+    message: str
+    data: Optional[Dict[str, Any]] = None
+    progress: Optional[float] = None
+
+
+@dataclass
 class StepStatusUpdate:
     """A status update during step execution."""
-    status: str  # 'thinking', 'tool_start', 'tool_complete', 'complete', 'error'
+    status: str  # 'thinking', 'tool_start', 'tool_progress', 'tool_complete', 'complete', 'error'
     message: str
     tool_name: Optional[str] = None
     tool_input: Optional[Dict[str, Any]] = None
     tool_output: Optional[str] = None
+    # Tool progress (only on 'tool_progress')
+    tool_progress: Optional[ToolProgressUpdate] = None
     # Final result (only on 'complete')
     result: Optional[StepResult] = None
 
@@ -73,6 +85,13 @@ class StepStatusUpdate:
             data["tool_input"] = self.tool_input
         if self.tool_output:
             data["tool_output"] = self.tool_output[:500] if self.tool_output else None  # Truncate for status
+        if self.tool_progress:
+            data["tool_progress"] = {
+                "stage": self.tool_progress.stage,
+                "message": self.tool_progress.message,
+                "data": self.tool_progress.data,
+                "progress": self.tool_progress.progress
+            }
         if self.result:
             data["result"] = {
                 "success": self.result.success,
@@ -198,10 +217,36 @@ RIGHT: [Actually call web_search, then return the compiled list]
                     tool_input=tool_input
                 )
 
-                # Execute the tool
-                tool_result_str = await self._execute_tool(
-                    tool_name, tool_input, tools_by_name
-                )
+                # Execute the tool (may be streaming)
+                tool_config = tools_by_name.get(tool_name)
+                tool_result_str = ""
+
+                if tool_config and tool_config.streaming:
+                    # Streaming tool - yields progress updates
+                    async for progress_or_result in self._execute_streaming_tool(
+                        tool_name, tool_input, tools_by_name
+                    ):
+                        if isinstance(progress_or_result, ToolProgress):
+                            # Yield progress update
+                            yield StepStatusUpdate(
+                                status="tool_progress",
+                                message=progress_or_result.message,
+                                tool_name=tool_name,
+                                tool_progress=ToolProgressUpdate(
+                                    stage=progress_or_result.stage,
+                                    message=progress_or_result.message,
+                                    data=progress_or_result.data,
+                                    progress=progress_or_result.progress
+                                )
+                            )
+                        else:
+                            # Final result
+                            tool_result_str = progress_or_result
+                else:
+                    # Non-streaming tool
+                    tool_result_str = await self._execute_tool(
+                        tool_name, tool_input, tools_by_name
+                    )
 
                 # Record the tool call
                 tool_calls.append(ToolCallRecord(
@@ -303,7 +348,7 @@ RIGHT: [Actually call web_search, then return the compiled list]
         tool_input: Dict[str, Any],
         tools_by_name: Dict[str, Any]
     ) -> str:
-        """Execute a tool and return result string."""
+        """Execute a non-streaming tool and return result string."""
         tool_config = tools_by_name.get(tool_name)
 
         if not tool_config:
@@ -329,6 +374,76 @@ RIGHT: [Actually call web_search, then return the compiled list]
         except Exception as e:
             logger.error(f"Tool execution error: {e}", exc_info=True)
             return f"Error executing tool: {str(e)}"
+
+    async def _execute_streaming_tool(
+        self,
+        tool_name: str,
+        tool_input: Dict[str, Any],
+        tools_by_name: Dict[str, Any]
+    ) -> AsyncGenerator[ToolProgress | str, None]:
+        """Execute a streaming tool, yielding progress updates and final result."""
+        tool_config = tools_by_name.get(tool_name)
+
+        if not tool_config:
+            yield f"Unknown tool: {tool_name}"
+            return
+
+        try:
+            context = {}  # Fresh context for step execution
+
+            # Get the generator from the tool
+            def run_generator():
+                return tool_config.executor(
+                    tool_input,
+                    self.db,
+                    self.user_id,
+                    context
+                )
+
+            generator = await asyncio.to_thread(run_generator)
+
+            # If it's a generator, iterate through it
+            if isinstance(generator, types.GeneratorType):
+                final_result = None
+                try:
+                    while True:
+                        # Get next item from generator in thread
+                        def get_next():
+                            return next(generator)
+                        try:
+                            item = await asyncio.to_thread(get_next)
+                            if isinstance(item, ToolProgress):
+                                yield item
+                            elif isinstance(item, ToolResult):
+                                final_result = item.text
+                        except StopIteration as e:
+                            # Generator returned a value
+                            if e.value is not None:
+                                if isinstance(e.value, ToolResult):
+                                    final_result = e.value.text
+                                elif isinstance(e.value, str):
+                                    final_result = e.value
+                                else:
+                                    final_result = str(e.value)
+                            break
+                except Exception as e:
+                    logger.error(f"Streaming tool iteration error: {e}", exc_info=True)
+                    yield f"Error during tool execution: {str(e)}"
+                    return
+
+                yield final_result or ""
+            else:
+                # Not a generator - treat as regular result
+                if isinstance(generator, ToolResult):
+                    yield generator.text
+                elif isinstance(generator, str):
+                    yield generator
+                else:
+                    yield str(generator)
+
+        except Exception as e:
+            logger.error(f"Streaming tool execution error: {e}", exc_info=True)
+            yield f"Error executing tool: {str(e)}"
 
     def _infer_content_type(self, output: str, output_format: str) -> str:
         """Infer content type from output and format hint."""

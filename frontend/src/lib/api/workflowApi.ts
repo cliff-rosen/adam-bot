@@ -27,12 +27,20 @@ export interface StepExecutionResult {
     error: string | null;
 }
 
+export interface ToolProgressUpdate {
+    stage: string;
+    message: string;
+    data?: Record<string, any>;
+    progress?: number;  // 0-1 progress indicator
+}
+
 export interface StepStatusUpdate {
-    status: 'thinking' | 'tool_start' | 'tool_complete' | 'complete' | 'error';
+    status: 'thinking' | 'tool_start' | 'tool_progress' | 'tool_complete' | 'complete' | 'error';
     message: string;
     tool_name?: string;
     tool_input?: Record<string, any>;
     tool_output?: string;
+    tool_progress?: ToolProgressUpdate;  // Present on 'tool_progress' status
     result?: StepExecutionResult;
 }
 
