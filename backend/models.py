@@ -28,6 +28,7 @@ class AssetType(str, PyEnum):
     DATA = "data"
     CODE = "code"
     LINK = "link"
+    LIST = "list"  # Iterable list of items (JSON array in content field)
 
 Base = declarative_base()
 

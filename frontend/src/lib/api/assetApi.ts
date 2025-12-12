@@ -6,7 +6,7 @@
 
 import { api } from './index';
 
-export type AssetType = 'file' | 'document' | 'data' | 'code' | 'link';
+export type AssetType = 'file' | 'document' | 'data' | 'code' | 'link' | 'list';
 
 export interface Asset {
     asset_id: number;

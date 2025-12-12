@@ -5,7 +5,7 @@ A lightweight agent that executes individual workflow steps with fresh context.
 Streams status updates via SSE for real-time feedback.
 """
 
-from typing import Dict, Any, List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator
 from dataclasses import dataclass, field
 from sqlalchemy.orm import Session
 import anthropic
@@ -28,7 +28,7 @@ class StepAssignment:
     """What the main agent sends to the step executor."""
     step_number: int
     description: str
-    input_data: str
+    input_data: Dict[str, str]  # Named inputs from multiple sources
     output_format: str
     available_tools: List[str]  # Tool names to enable
 
@@ -135,13 +135,16 @@ class StepExecutionService:
 
             tool_list = ", ".join(assignment.available_tools) if assignment.available_tools else "None"
 
+            # Format input data as JSON for multi-source inputs
+            input_section = json.dumps(assignment.input_data, indent=2)
+
             system_prompt = f"""You are a task execution agent. Execute the task and return ONLY the output.
 
             ## Task
             {assignment.description}
 
-            ## Input Data
-            {assignment.input_data}
+            ## Input Data (JSON with named sources)
+            {input_section}
 
             ## Required Output
             {assignment.output_format}

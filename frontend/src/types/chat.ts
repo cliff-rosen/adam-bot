@@ -77,7 +77,7 @@ export interface WorkflowStep {
     step_number: number;
     description: string;
     input_description: string;
-    input_source: 'user' | number;        // 'user' or step number
+    input_sources: ('user' | number)[];   // Array of sources: 'user' and/or step numbers
     output_description: string;
     method: StepMethod;
     status: 'pending' | 'in_progress' | 'completed' | 'skipped';
@@ -87,7 +87,7 @@ export interface WorkflowStep {
 export interface WorkflowStepDefinition {
     description: string;
     input_description: string;
-    input_source: 'user' | number;
+    input_sources: ('user' | number)[];   // Array of sources
     output_description: string;
     method: StepMethod;
 }

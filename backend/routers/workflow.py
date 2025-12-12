@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Dict, List, Optional
 import asyncio
 
 from database import get_db
@@ -27,7 +27,7 @@ def get_current_user_id() -> int:
 class StepExecutionRequest(BaseModel):
     step_number: int
     description: str
-    input_data: str
+    input_data: Dict[str, str]  # JSON object with named inputs from multiple sources
     output_format: str
     available_tools: List[str] = []
 

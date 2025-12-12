@@ -8,7 +8,7 @@ import { makeStreamRequest } from './streamUtils';
 export interface StepExecutionRequest {
     step_number: number;
     description: string;
-    input_data: string;
+    input_data: Record<string, string>;  // JSON object with named inputs
     output_format: string;
     available_tools: string[];
 }

@@ -392,11 +392,27 @@ export default function MainPage() {
     const [currentToolProgress, setCurrentToolProgress] = useState<ToolProgressUpdate[]>([]);
     const [currentToolName, setCurrentToolName] = useState<string | null>(null);
 
+    // Helper to build input data object from multiple sources
+    const buildInputData = useCallback((
+        workflow: WorkflowPlan,
+        step: WorkflowStep
+    ): Record<string, string> => {
+        const inputData: Record<string, string> = {};
+        for (const source of step.input_sources) {
+            if (source === 'user') {
+                inputData['user_input'] = workflow.initial_input;
+            } else {
+                const sourceStep = workflow.steps.find(s => s.step_number === source);
+                inputData[`step_${source}`] = sourceStep?.wip_output?.content || '';
+            }
+        }
+        return inputData;
+    }, []);
+
     // Helper to execute a step via dedicated step agent with streaming
     const executeStep = useCallback(async (
-        _workflow: WorkflowPlan,
-        step: WorkflowStep,
-        inputData: string
+        workflow: WorkflowPlan,
+        step: WorkflowStep
     ) => {
         setExecutingStep(step);
         setStepStatus('Starting...');
@@ -404,6 +420,9 @@ export default function MainPage() {
         setCurrentToolProgress([]);
         setCurrentToolName(null);
         setActivePayload(null);
+
+        // Build input data from all sources
+        const inputData = buildInputData(workflow, step);
 
         try {
             let finalResult: StepStatusUpdate['result'] | null = null;
@@ -473,7 +492,7 @@ export default function MainPage() {
                 InteractionType.TEXT_INPUT
             );
         }
-    }, [sendMessage]);
+    }, [sendMessage, buildInputData]);
 
     // Workflow handlers
     const handleAcceptPlan = useCallback((payload: WorkspacePayload) => {
@@ -484,7 +503,7 @@ export default function MainPage() {
             step_number: idx + 1,
             description: step.description,
             input_description: step.input_description,
-            input_source: step.input_source,
+            input_sources: step.input_sources,
             output_description: step.output_description,
             method: step.method,
             status: idx === 0 ? 'in_progress' : 'pending'
@@ -506,10 +525,7 @@ export default function MainPage() {
 
         // Execute the first step via dedicated step agent
         const firstStep = workflowSteps[0];
-        const inputData = firstStep.input_source === 'user'
-            ? payload.initial_input || 'User request'
-            : '';
-        executeStep(workflow, firstStep, inputData);
+        executeStep(workflow, firstStep);
     }, [executeStep]);
 
     const handleRejectPlan = useCallback(() => {
@@ -569,11 +585,8 @@ export default function MainPage() {
             // Execute next step via dedicated step agent
             const nextStep = updatedSteps.find(s => s.status === 'in_progress');
             if (nextStep) {
-                // Get input for next step - either from previous step output or initial input
-                const inputData = nextStep.input_source === 'user'
-                    ? activeWorkflow.initial_input
-                    : payload.content;  // Output from current step is input to next
-                executeStep(updatedWorkflow, nextStep, inputData);
+                // Execute with multi-source input gathering
+                executeStep(updatedWorkflow, nextStep);
             }
         }
     }, [activeWorkflow, executeStep, handleSavePayloadAsAsset]);
@@ -591,14 +604,8 @@ export default function MainPage() {
 
         const currentStep = activeWorkflow.steps.find(s => s.status === 'in_progress');
         if (currentStep) {
-            // Get input for this step again
-            let inputData = activeWorkflow.initial_input;
-            if (typeof currentStep.input_source === 'number') {
-                const sourceStep = activeWorkflow.steps.find(s => s.step_number === currentStep.input_source);
-                inputData = sourceStep?.wip_output?.content || activeWorkflow.initial_input;
-            }
-            // Re-execute the step
-            executeStep(activeWorkflow, currentStep, inputData);
+            // Re-execute the step with multi-source input gathering
+            executeStep(activeWorkflow, currentStep);
         }
         setActivePayload(null);
     }, [activeWorkflow, executeStep]);
