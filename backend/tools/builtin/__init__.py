@@ -15,6 +15,7 @@ from .pubmed_search import register_pubmed_search_tools
 from .arxiv_search import register_arxiv_search_tools
 from .assets import register_asset_tools
 from .gmail import register_gmail_tools
+from .agents import register_agent_tools
 
 
 def register_all_builtin_tools():
@@ -30,6 +31,7 @@ def register_all_builtin_tools():
     register_arxiv_search_tools()
     register_asset_tools()
     register_gmail_tools()
+    register_agent_tools()
 
 
 __all__ = [
@@ -44,5 +46,6 @@ __all__ = [
     'register_arxiv_search_tools',
     'register_asset_tools',
     'register_gmail_tools',
+    'register_agent_tools',
     'register_all_builtin_tools'
 ]
