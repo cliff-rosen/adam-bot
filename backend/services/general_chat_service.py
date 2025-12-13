@@ -101,7 +101,8 @@ class GeneralChatService:
             system_prompt = self._build_system_prompt(
                 tool_descriptions,
                 user_message=user_prompt,
-                include_profile=request.include_profile
+                include_profile=request.include_profile,
+                has_workflow_builder='design_workflow' in tools_by_name
             )
 
             # Send initial status
@@ -348,7 +349,8 @@ class GeneralChatService:
         self,
         tool_descriptions: str,
         user_message: Optional[str] = None,
-        include_profile: bool = True
+        include_profile: bool = True,
+        has_workflow_builder: bool = False
     ) -> str:
         """
         Build the system prompt for the primary agent.
@@ -357,8 +359,10 @@ class GeneralChatService:
             tool_descriptions: Pre-formatted tool descriptions
             user_message: The user's current message (for semantic memory search)
             include_profile: Whether to include user profile information
+            has_workflow_builder: Whether the design_workflow tool is available
         """
         context_section = self._build_context_section(user_message, include_profile)
+        workflow_section = self._build_workflow_section(has_workflow_builder)
 
         return f"""You are CMR Bot, a personal AI assistant with full access to tools and capabilities.
 
@@ -428,54 +432,7 @@ class GeneralChatService:
         - Provide brief commentary
         - Include a `summary` payload with the bullet points
 
-        ## Workflow Plans
-
-        For complex, multi-step tasks that require a structured approach, you can propose a **workflow plan**. Workflows are chains of steps where each step has an input, a method (how you'll accomplish it), and an output. The user reviews and approves each step's output before you proceed to the next.
-
-        **When to propose a workflow:**
-        - Tasks requiring multiple distinct phases (research → analyze → create)
-        - Complex deliverables that need iteration
-        - Projects where the user wants visibility into your process
-        - Tasks where intermediate outputs might need user feedback
-        - Research or analysis of MULTIPLE items that need synthesis
-        - Comparison tasks (e.g., "compare these 5 options")
-
-        **IMPORTANT: Use the design_workflow tool**
-
-        When you decide a workflow is appropriate, DO NOT create the workflow plan yourself. Instead, call the `design_workflow` tool with the user's goal. This specialized workflow architect will design an optimal plan that leverages advanced patterns like:
-        - **map_reduce**: For processing multiple items and synthesizing results (e.g., research 5 companies and compare them)
-        - **iterate**: For applying the same operation to multiple items in parallel
-        - **Multi-source inputs**: For steps that combine data from multiple prior steps
-
-        Example: If the user asks "Research these 5 AI companies and compare them", call:
-        ```
-        design_workflow(goal="Research and compare 5 AI companies: OpenAI, Anthropic, Google DeepMind, Meta AI, and Mistral")
-        ```
-
-        **CRITICAL**: When design_workflow returns, it will give you a complete plan with a payload block. You MUST:
-        1. Present the plan to the user by including the payload block in your response
-        2. Do NOT start executing the workflow or calling other tools
-        3. Wait for the user to approve the plan before doing anything else
-
-        The tool result will contain the exact payload JSON to include - just copy it into your response.
-
-        **Plan payload format (after receiving from design_workflow):**
-
-        ```payload
-        {{
-        "type": "plan",
-        "title": "<from workflow>",
-        "goal": "<from workflow>",
-        "initial_input": "<user's input>",
-        "steps": [<steps from workflow>]
-        }}
-        ```
-
-        **input_sources** indicates where each step gets its input:
-        - `["user"]` - The initial input provided by the user
-        - `[1]`, `[2]` - Output from a previous step
-        - `["user", 1]` - Multiple sources combined
-
+{workflow_section}
         ## Executing Workflow Steps (WIP Outputs)
 
         When the user accepts a plan and asks you to execute a step, send your output as a **wip (work-in-progress)** payload. The user will review and either accept, request changes, or reject each step's output.
@@ -556,6 +513,108 @@ class GeneralChatService:
         logger.info(f"Asset context: {asset_context}")
 
         return context_section
+
+    def _build_workflow_section(self, has_workflow_builder: bool) -> str:
+        """
+        Build the workflow planning section of the system prompt.
+
+        Args:
+            has_workflow_builder: Whether the design_workflow tool is available
+
+        Returns:
+            Workflow section string
+        """
+        base_section = """## Workflow Plans
+
+        For complex, multi-step tasks that require a structured approach, you can propose a **workflow plan**. Workflows are chains of steps where each step has an input, a method (how you'll accomplish it), and an output. The user reviews and approves each step's output before you proceed to the next.
+
+        **When to propose a workflow:**
+        - Tasks requiring multiple distinct phases (research → analyze → create)
+        - Complex deliverables that need iteration
+        - Projects where the user wants visibility into your process
+        - Tasks where intermediate outputs might need user feedback
+        - Research or analysis of MULTIPLE items that need synthesis
+        - Comparison tasks (e.g., "compare these 5 options")
+
+"""
+
+        if has_workflow_builder:
+            # When design_workflow is available, tell agent to use it
+            return base_section + """**IMPORTANT: Use the design_workflow tool**
+
+        When you decide a workflow is appropriate, DO NOT create the workflow plan yourself. Instead, call the `design_workflow` tool with the user's goal. This specialized workflow architect will design an optimal plan that leverages advanced patterns like:
+        - **map_reduce**: For processing multiple items and synthesizing results (e.g., research 5 companies and compare them)
+        - **iterate**: For applying the same operation to multiple items in parallel
+        - **Multi-source inputs**: For steps that combine data from multiple prior steps
+
+        Example: If the user asks "Research these 5 AI companies and compare them", call:
+        ```
+        design_workflow(goal="Research and compare 5 AI companies: OpenAI, Anthropic, Google DeepMind, Meta AI, and Mistral")
+        ```
+
+        **CRITICAL**: When design_workflow returns, it will give you a complete plan with a payload block. You MUST:
+        1. Present the plan to the user by including the payload block in your response
+        2. Do NOT start executing the workflow or calling other tools
+        3. Wait for the user to approve the plan before doing anything else
+
+        The tool result will contain the exact payload JSON to include - just copy it into your response.
+
+        **Plan payload format (after receiving from design_workflow):**
+
+        ```payload
+        {{
+        "type": "plan",
+        "title": "<from workflow>",
+        "goal": "<from workflow>",
+        "initial_input": "<user's input>",
+        "steps": [<steps from workflow>]
+        }}
+        ```
+
+        **input_sources** indicates where each step gets its input:
+        - `["user"]` - The initial input provided by the user
+        - `[1]`, `[2]` - Output from a previous step
+        - `["user", 1]` - Multiple sources combined
+
+"""
+        else:
+            # When design_workflow is NOT available, agent creates workflows directly
+            return base_section + """**Plan payload format:**
+
+        ```payload
+        {{
+        "type": "plan",
+        "title": "<workflow title>",
+        "goal": "<what the workflow will achieve>",
+        "initial_input": "<what the user is providing to start>",
+        "steps": [
+            {{
+            "description": "<what this step does>",
+            "input_description": "<what this step takes as input>",
+            "input_sources": ["user"],
+            "output_description": "<what this step produces>",
+            "method": {{
+                "approach": "<how you'll accomplish this>",
+                "tools": ["<tool1>", "<tool2>"],
+                "reasoning": "<why this approach>"
+            }}
+            }}
+        ]
+        }}
+        ```
+
+        **input_sources** indicates where each step gets its input:
+        - `["user"]` - The initial input provided by the user
+        - `[1]`, `[2]` - Output from a previous step (by step number)
+        - `["user", 1]` - Multiple sources combined
+
+        **Tips for good workflow design:**
+        - Keep workflows to 2-4 steps when possible
+        - Consider using `map_reduce` tool when processing multiple items that need synthesis
+        - Consider using `iterate` tool when applying the same operation to multiple items
+        - Steps can have multiple input_sources to combine data from different steps
+
+"""
 
     def _get_profile_context(self, include_profile: bool = True) -> str:
         """Get formatted user profile for system prompt."""
