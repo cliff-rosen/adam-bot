@@ -68,7 +68,49 @@ export default function ChatPanel({
         const lastMessage = messages[messages.length - 1];
         if (lastMessage.role !== 'assistant') return;
 
-        const { payload } = parseWorkspacePayload(lastMessage.content);
+        // First check message content for payload
+        let payload: WorkspacePayload | null = parseWorkspacePayload(lastMessage.content).payload;
+
+        // If no payload in content, check tool outputs
+        if (!payload && lastMessage.custom_payload?.type === 'tool_history') {
+            const toolCalls = lastMessage.custom_payload.data as ToolCall[];
+            for (const toolCall of toolCalls) {
+                // Check if output is structured agent data
+                if (typeof toolCall.output === 'object' && toolCall.output !== null) {
+                    const outputObj = toolCall.output as Record<string, unknown>;
+                    if (outputObj.payload_type === 'agent_create' && outputObj.agent_data) {
+                        const agentData = outputObj.agent_data as Record<string, unknown>;
+                        payload = {
+                            type: 'agent_create',
+                            title: `Create Agent: ${agentData.name}`,
+                            content: (agentData.description as string) || `New ${agentData.lifecycle} agent`,
+                            agent_data: agentData as unknown as WorkspacePayload['agent_data']
+                        };
+                        break;
+                    }
+                    if (outputObj.payload_type === 'agent_update' && outputObj.agent_data) {
+                        const agentData = outputObj.agent_data as Record<string, unknown>;
+                        payload = {
+                            type: 'agent_update',
+                            title: `Update Agent: ${agentData.name}`,
+                            content: `Updating agent ${agentData.agent_id}`,
+                            agent_data: agentData as unknown as WorkspacePayload['agent_data']
+                        };
+                        break;
+                    }
+                }
+                // Fall back to parsing text output
+                const output = typeof toolCall.output === 'string'
+                    ? toolCall.output
+                    : JSON.stringify(toolCall.output);
+                const parsed = parseWorkspacePayload(output);
+                if (parsed.payload) {
+                    payload = parsed.payload;
+                    break;
+                }
+            }
+        }
+
         if (payload) {
             // Create a unique key for this payload to avoid re-triggering
             const payloadKey = `${lastMessage.timestamp}-${payload.title}`;
@@ -156,9 +198,54 @@ export default function ChatPanel({
 
                 {messages.map((message, idx) => {
                     // Parse payload from assistant messages
-                    const { text: displayText, payload } = message.role === 'assistant'
-                        ? parseWorkspacePayload(message.content)
-                        : { text: message.content, payload: null };
+                    let displayText = message.content;
+                    let payload: WorkspacePayload | null = null;
+
+                    if (message.role === 'assistant') {
+                        const parsed = parseWorkspacePayload(message.content);
+                        displayText = parsed.text;
+                        payload = parsed.payload;
+
+                        // If no payload in content, check tool outputs
+                        if (!payload && message.custom_payload?.type === 'tool_history') {
+                            const toolCalls = message.custom_payload.data as ToolCall[];
+                            for (const toolCall of toolCalls) {
+                                // Check if output is structured agent data
+                                if (typeof toolCall.output === 'object' && toolCall.output !== null) {
+                                    const outputObj = toolCall.output as Record<string, unknown>;
+                                    if (outputObj.payload_type === 'agent_create' && outputObj.agent_data) {
+                                        const agentData = outputObj.agent_data as Record<string, unknown>;
+                                        payload = {
+                                            type: 'agent_create',
+                                            title: `Create Agent: ${agentData.name}`,
+                                            content: (agentData.description as string) || `New ${agentData.lifecycle} agent`,
+                                            agent_data: agentData as unknown as WorkspacePayload['agent_data']
+                                        };
+                                        break;
+                                    }
+                                    if (outputObj.payload_type === 'agent_update' && outputObj.agent_data) {
+                                        const agentData = outputObj.agent_data as Record<string, unknown>;
+                                        payload = {
+                                            type: 'agent_update',
+                                            title: `Update Agent: ${agentData.name}`,
+                                            content: `Updating agent ${agentData.agent_id}`,
+                                            agent_data: agentData as unknown as WorkspacePayload['agent_data']
+                                        };
+                                        break;
+                                    }
+                                }
+                                // Fall back to parsing text output
+                                const output = typeof toolCall.output === 'string'
+                                    ? toolCall.output
+                                    : JSON.stringify(toolCall.output);
+                                const toolParsed = parseWorkspacePayload(output);
+                                if (toolParsed.payload) {
+                                    payload = toolParsed.payload;
+                                    break;
+                                }
+                            }
+                        }
+                    }
 
                     return (
                     <div key={idx}>
@@ -179,7 +266,7 @@ export default function ChatPanel({
                                 {/* Payload indicator */}
                                 {payload && (
                                     <button
-                                        onClick={() => onPayloadClick(payload)}
+                                        onClick={() => onPayloadClick(payload!)}
                                         className="mt-2 w-full flex items-center justify-between gap-2 px-3 py-2 bg-white/50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-600 hover:bg-white dark:hover:bg-gray-700 transition-colors"
                                     >
                                         <span className="text-sm font-medium text-gray-700 dark:text-gray-200">
