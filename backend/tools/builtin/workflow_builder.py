@@ -304,18 +304,32 @@ Return ONLY the JSON workflow plan, no other text. The JSON should follow the ex
             data={"steps": len(workflow_plan.get('steps', []))}
         )
 
-        # Return the workflow plan as structured data
+        # Build the payload JSON that the agent should present to the user
+        plan_payload = {
+            "type": "plan",
+            "title": workflow_plan.get("title", "Workflow Plan"),
+            "goal": workflow_plan.get("goal", goal),
+            "initial_input": initial_input or goal,
+            "steps": workflow_plan.get("steps", [])
+        }
+
+        payload_json = json.dumps(plan_payload, indent=2)
+
+        # Return with explicit instructions to present as payload
         return ToolResult(
-            text=f"Workflow designed: {workflow_plan.get('title', 'Untitled')}\n\n"
-                 f"Goal: {workflow_plan.get('goal', goal)}\n\n"
-                 f"Steps: {len(workflow_plan.get('steps', []))}\n"
-                 + "\n".join(
-                     f"  {i+1}. {step.get('description', 'No description')}"
-                     for i, step in enumerate(workflow_plan.get('steps', []))
-                 ),
+            text=f"""I've designed a workflow plan for this task.
+
+**IMPORTANT**: You must now present this plan to the user for approval. Include the following payload block at the end of your response:
+
+```payload
+{payload_json}
+```
+
+Briefly explain the workflow approach to the user, then include the payload above. Do NOT execute any steps yet - wait for the user to approve the plan first.""",
             data={
                 "type": "workflow_plan",
-                "workflow": workflow_plan
+                "workflow": workflow_plan,
+                "payload": plan_payload
             }
         )
 

@@ -452,7 +452,12 @@ class GeneralChatService:
         design_workflow(goal="Research and compare 5 AI companies: OpenAI, Anthropic, Google DeepMind, Meta AI, and Mistral")
         ```
 
-        The workflow builder will return an optimized plan. Then present it to the user as a `plan` payload.
+        **CRITICAL**: When design_workflow returns, it will give you a complete plan with a payload block. You MUST:
+        1. Present the plan to the user by including the payload block in your response
+        2. Do NOT start executing the workflow or calling other tools
+        3. Wait for the user to approve the plan before doing anything else
+
+        The tool result will contain the exact payload JSON to include - just copy it into your response.
 
         **Plan payload format (after receiving from design_workflow):**
 
