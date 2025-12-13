@@ -152,6 +152,8 @@ class GmailService:
             List of EmailMessage objects
         """
         service = self._get_service()
+        connected_email = self.get_connected_email()
+        logger.info(f"Listing messages for account {connected_email}, query: {query}")
 
         try:
             # Build request parameters
@@ -201,6 +203,8 @@ class GmailService:
             EmailMessage object
         """
         service = self._get_service()
+        connected_email = self.get_connected_email()
+        logger.info(f"Getting message {message_id} for account {connected_email}")
 
         try:
             format_type = "full" if include_body else "metadata"
