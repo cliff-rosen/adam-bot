@@ -111,3 +111,6 @@ export type { StepExecutionRequest, StepExecutionResult, StepStatusUpdate, ToolC
 
 export { toolsApi } from './toolsApi';
 export type { PubMedSearchRequest, PubMedArticle, PubMedSearchResponse } from './toolsApi';
+
+export { oauthApi } from './oauthApi';
+export type { OAuthConnectionStatus, OAuthConnections, GoogleAuthResponse } from './oauthApi';

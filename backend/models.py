@@ -30,6 +30,11 @@ class AssetType(str, PyEnum):
     LINK = "link"
     LIST = "list"  # Iterable list of items (JSON array in content field)
 
+
+class OAuthProvider(str, PyEnum):
+    """Supported OAuth providers"""
+    GOOGLE = "google"
+
 Base = declarative_base()
 
 
@@ -191,3 +196,31 @@ class Asset(Base):
     # Relationships
     user = relationship("User")
     source_conversation = relationship("Conversation")
+
+
+class OAuthToken(Base):
+    """OAuth tokens for third-party service integrations"""
+    __tablename__ = "oauth_tokens"
+
+    token_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    provider = Column(Enum(OAuthProvider, name='oauthprovider'), nullable=False)
+
+    # Token data
+    access_token = Column(Text, nullable=False)
+    refresh_token = Column(Text, nullable=True)
+    token_type = Column(String(50), default="Bearer")
+
+    # Token metadata
+    expires_at = Column(DateTime, nullable=True)
+    scopes = Column(JSON, default=list)  # List of granted scopes
+
+    # Provider-specific data (e.g., email address)
+    provider_data = Column(JSON, default=dict)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User")

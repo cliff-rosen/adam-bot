@@ -14,6 +14,7 @@ from database import get_db
 from models import User
 from routers.auth import get_current_user
 from services.pubmed_service import PubMedService
+from services.gmail_service import GmailService, GmailServiceError, NotConnectedError
 
 logger = logging.getLogger(__name__)
 
@@ -112,4 +113,94 @@ async def search_pubmed(
         )
     except Exception as e:
         logger.error(f"PubMed search error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# Gmail Search
+# ============================================================================
+
+class GmailSearchRequest(BaseModel):
+    """Request model for Gmail search."""
+    query: str
+    max_results: int = 10
+
+
+class GmailMessageResponse(BaseModel):
+    """Response model for a single Gmail message."""
+    id: str
+    thread_id: str
+    subject: str
+    sender: str
+    date: str
+    snippet: str
+    labels: List[str]
+
+
+class GmailSearchResponse(BaseModel):
+    """Response model for Gmail search."""
+    success: bool
+    query: str
+    count: int
+    messages: List[GmailMessageResponse]
+    error: Optional[str] = None
+
+
+@router.post("/gmail/search", response_model=GmailSearchResponse)
+async def search_gmail(
+    request: GmailSearchRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+) -> GmailSearchResponse:
+    """
+    Search Gmail for messages.
+
+    This is a simple testing endpoint that directly calls the Gmail service.
+    """
+    try:
+        service = GmailService(db, current_user.user_id)
+        messages = service.search_messages(
+            query=request.query,
+            max_results=min(request.max_results, 50)
+        )
+
+        message_responses = [
+            GmailMessageResponse(
+                id=msg.id,
+                thread_id=msg.thread_id,
+                subject=msg.subject,
+                sender=msg.sender,
+                date=msg.date,
+                snippet=msg.snippet,
+                labels=msg.labels
+            )
+            for msg in messages
+        ]
+
+        return GmailSearchResponse(
+            success=True,
+            query=request.query,
+            count=len(messages),
+            messages=message_responses
+        )
+
+    except NotConnectedError as e:
+        return GmailSearchResponse(
+            success=False,
+            query=request.query,
+            count=0,
+            messages=[],
+            error=str(e)
+        )
+    except GmailServiceError as e:
+        logger.error(f"Gmail search error: {e}", exc_info=True)
+        return GmailSearchResponse(
+            success=False,
+            query=request.query,
+            count=0,
+            messages=[],
+            error=str(e)
+        )
+    except Exception as e:
+        logger.error(f"Gmail search error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

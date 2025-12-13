@@ -1,4 +1,5 @@
 import PubMedSearch from '../components/tools/PubMedSearch';
+import GmailSearch from '../components/tools/GmailSearch';
 
 export default function Tools() {
     return (
@@ -13,6 +14,7 @@ export default function Tools() {
             </div>
 
             <div className="space-y-8">
+                <GmailSearch />
                 <PubMedSearch />
             </div>
         </div>

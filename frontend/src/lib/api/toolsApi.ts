@@ -37,12 +37,47 @@ export interface PubMedSearchResponse {
     error?: string;
 }
 
+// ============================================================================
+// Gmail Search
+// ============================================================================
+
+export interface GmailSearchRequest {
+    query: string;
+    max_results?: number;
+}
+
+export interface GmailMessage {
+    id: string;
+    thread_id: string;
+    subject: string;
+    sender: string;
+    date: string;
+    snippet: string;
+    labels: string[];
+}
+
+export interface GmailSearchResponse {
+    success: boolean;
+    query: string;
+    count: number;
+    messages: GmailMessage[];
+    error?: string;
+}
+
 export const toolsApi = {
     /**
      * Search PubMed for articles
      */
     async searchPubMed(request: PubMedSearchRequest): Promise<PubMedSearchResponse> {
         const response = await api.post('/api/tools/pubmed/search', request);
+        return response.data;
+    },
+
+    /**
+     * Search Gmail for messages
+     */
+    async searchGmail(request: GmailSearchRequest): Promise<GmailSearchResponse> {
+        const response = await api.post('/api/tools/gmail/search', request);
         return response.data;
     }
 };
