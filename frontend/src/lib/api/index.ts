@@ -114,3 +114,6 @@ export type { PubMedSearchRequest, PubMedArticle, PubMedSearchResponse } from '.
 
 export { oauthApi } from './oauthApi';
 export type { OAuthConnectionStatus, OAuthConnections, GoogleAuthResponse } from './oauthApi';
+
+export { agentApi } from './agentApi';
+export type { Agent, AgentRun, AgentRunEvent, AgentDetail, AgentLifecycle, AgentStatus, AgentRunStatus, AgentRunEventType, CreateAgentRequest, UpdateAgentRequest } from './agentApi';

@@ -1,6 +1,6 @@
 import { useTheme } from '../context/ThemeContext';
 import { NavLink, useLocation } from 'react-router-dom';
-import { MoonIcon, SunIcon, UserCircleIcon, ChatBubbleLeftRightIcon, WrenchScrewdriverIcon } from '@heroicons/react/24/outline';
+import { MoonIcon, SunIcon, UserCircleIcon, ChatBubbleLeftRightIcon, WrenchScrewdriverIcon, CpuChipIcon } from '@heroicons/react/24/outline';
 import settings from '../config/settings';
 import { useAuth } from '../context/AuthContext';
 
@@ -32,7 +32,11 @@ export default function TopBar() {
                 <nav className="flex items-center gap-2">
                     <NavLink to="/" className={getLinkClass('/')}>
                         <ChatBubbleLeftRightIcon className="h-5 w-5 mr-2" />
-                        Agent
+                        Chat
+                    </NavLink>
+                    <NavLink to="/agents" className={getLinkClass('/agents')}>
+                        <CpuChipIcon className="h-5 w-5 mr-2" />
+                        Agents
                     </NavLink>
                     <NavLink to="/tools" className={getLinkClass('/tools')}>
                         <WrenchScrewdriverIcon className="h-5 w-5 mr-2" />

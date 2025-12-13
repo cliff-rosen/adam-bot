@@ -19,6 +19,7 @@ import MainPage from './pages/MainPage';
 import Profile from './pages/Profile';
 import Tools from './pages/Tools';
 import TokenLogin from './pages/TokenLogin';
+import AgentsPage from './pages/AgentsPage';
 
 // Inner component that uses auth context
 function AppContent() {
@@ -38,6 +39,7 @@ function AppContent() {
         <main className="flex-1 overflow-hidden pt-16">
           <Routes>
             <Route path="/" element={<MainPage />} />
+            <Route path="/agents" element={<AgentsPage />} />
             <Route path="/tools" element={<Tools />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Navigate to="/profile" replace />} />
