@@ -490,6 +490,156 @@ export default function AgentsPage() {
     );
 }
 
+// Tool tabs configuration (matching ContextPanel)
+type ToolTab = 'system' | 'search' | 'process' | 'workflow' | 'agents' | 'mail';
+
+const TOOL_TABS: { key: ToolTab; label: string; categories: string[] }[] = [
+    { key: 'system', label: 'System', categories: ['memory', 'assets'] },
+    { key: 'search', label: 'Search', categories: ['search', 'research'] },
+    { key: 'process', label: 'Process', categories: ['processing'] },
+    { key: 'workflow', label: 'Flow', categories: ['workflow'] },
+    { key: 'agents', label: 'Agents', categories: ['agents'] },
+    { key: 'mail', label: 'Mail', categories: ['integrations', 'email'] },
+];
+
+// Tool Selector Component
+function ToolSelector({
+    availableTools,
+    selectedTools,
+    setSelectedTools
+}: {
+    availableTools: ToolInfo[];
+    selectedTools: Set<string>;
+    setSelectedTools: React.Dispatch<React.SetStateAction<Set<string>>>;
+}) {
+    const [activeTab, setActiveTab] = useState<ToolTab>('search');
+
+    // Get tools for current tab
+    const getToolsForTab = (tab: ToolTab) => {
+        const tabConfig = TOOL_TABS.find(t => t.key === tab);
+        if (!tabConfig) return [];
+        return availableTools.filter(tool => tabConfig.categories.includes(tool.category));
+    };
+
+    // Count selected tools per tab
+    const getTabCounts = (tab: ToolTab) => {
+        const tools = getToolsForTab(tab);
+        const selected = tools.filter(t => selectedTools.has(t.name)).length;
+        return { selected, total: tools.length };
+    };
+
+    const toggleTool = (toolName: string) => {
+        setSelectedTools(prev => {
+            const next = new Set(prev);
+            if (next.has(toolName)) {
+                next.delete(toolName);
+            } else {
+                next.add(toolName);
+            }
+            return next;
+        });
+    };
+
+    const selectAllInTab = () => {
+        const tools = getToolsForTab(activeTab);
+        setSelectedTools(prev => new Set([...prev, ...tools.map(t => t.name)]));
+    };
+
+    const clearAllInTab = () => {
+        const toolNames = new Set(getToolsForTab(activeTab).map(t => t.name));
+        setSelectedTools(prev => new Set([...prev].filter(t => !toolNames.has(t))));
+    };
+
+    const currentTools = getToolsForTab(activeTab);
+
+    return (
+        <div>
+            <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Tools ({selectedTools.size} selected)
+                </label>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex border border-gray-300 dark:border-gray-600 rounded-t-md overflow-hidden">
+                {TOOL_TABS.map(tab => {
+                    const counts = getTabCounts(tab.key);
+                    if (counts.total === 0) return null;
+                    const isActive = activeTab === tab.key;
+                    return (
+                        <button
+                            key={tab.key}
+                            type="button"
+                            onClick={() => setActiveTab(tab.key)}
+                            className={`flex-1 px-1 py-2 text-xs font-medium transition-colors border-r last:border-r-0 border-gray-300 dark:border-gray-600 ${
+                                isActive
+                                    ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30'
+                                    : 'text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                            }`}
+                        >
+                            <div className="truncate">{tab.label}</div>
+                            <div className="text-[10px] opacity-70">
+                                {counts.selected}/{counts.total}
+                            </div>
+                        </button>
+                    );
+                })}
+            </div>
+
+            {/* Enable/Disable buttons */}
+            <div className="flex gap-1 px-2 py-1.5 border-x border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800">
+                <button
+                    type="button"
+                    onClick={selectAllInTab}
+                    className="flex-1 px-2 py-1 text-[10px] text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20 rounded transition-colors"
+                >
+                    Select All
+                </button>
+                <button
+                    type="button"
+                    onClick={clearAllInTab}
+                    className="flex-1 px-2 py-1 text-[10px] text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                >
+                    Clear All
+                </button>
+            </div>
+
+            {/* Tools list */}
+            <div className="max-h-48 overflow-y-auto border border-t-0 border-gray-300 dark:border-gray-600 rounded-b-md">
+                {currentTools.length === 0 ? (
+                    <div className="p-3 text-sm text-gray-500 dark:text-gray-400 text-center">
+                        No tools in this category
+                    </div>
+                ) : (
+                    <div className="p-1">
+                        {currentTools.map(tool => (
+                            <label
+                                key={tool.name}
+                                className="flex items-start gap-2 p-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded cursor-pointer"
+                            >
+                                <input
+                                    type="checkbox"
+                                    checked={selectedTools.has(tool.name)}
+                                    onChange={() => toggleTool(tool.name)}
+                                    className="mt-0.5 rounded border-gray-300 dark:border-gray-600"
+                                />
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-sm font-medium text-gray-900 dark:text-white">
+                                        {tool.name}
+                                    </div>
+                                    <div className="text-xs text-gray-500 dark:text-gray-400 line-clamp-2">
+                                        {tool.description}
+                                    </div>
+                                </div>
+                            </label>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
 // Create Agent Modal Component
 function CreateAgentModal({
     availableTools,
@@ -516,18 +666,6 @@ function CreateAgentModal({
             lifecycle,
             tools: Array.from(selectedTools),
             monitor_interval_minutes: lifecycle === 'monitor' ? monitorInterval : undefined
-        });
-    };
-
-    const toggleTool = (toolName: string) => {
-        setSelectedTools(prev => {
-            const next = new Set(prev);
-            if (next.has(toolName)) {
-                next.delete(toolName);
-            } else {
-                next.add(toolName);
-            }
-            return next;
         });
     };
 
@@ -616,30 +754,11 @@ function CreateAgentModal({
                     </div>
 
                     {/* Tools */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Available Tools
-                        </label>
-                        <div className="max-h-40 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md p-2 space-y-1">
-                            {availableTools.map(tool => (
-                                <label
-                                    key={tool.name}
-                                    className="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedTools.has(tool.name)}
-                                        onChange={() => toggleTool(tool.name)}
-                                        className="rounded border-gray-300 dark:border-gray-600"
-                                    />
-                                    <span className="text-sm text-gray-900 dark:text-white">{tool.name}</span>
-                                    <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                        - {tool.description}
-                                    </span>
-                                </label>
-                            ))}
-                        </div>
-                    </div>
+                    <ToolSelector
+                        availableTools={availableTools}
+                        selectedTools={selectedTools}
+                        setSelectedTools={setSelectedTools}
+                    />
                 </form>
 
                 <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">
@@ -689,18 +808,6 @@ function EditAgentModal({
             instructions,
             tools: Array.from(selectedTools),
             monitor_interval_minutes: agent.lifecycle === 'monitor' ? monitorInterval : undefined
-        });
-    };
-
-    const toggleTool = (toolName: string) => {
-        setSelectedTools(prev => {
-            const next = new Set(prev);
-            if (next.has(toolName)) {
-                next.delete(toolName);
-            } else {
-                next.add(toolName);
-            }
-            return next;
         });
     };
 
@@ -784,30 +891,11 @@ function EditAgentModal({
                     </div>
 
                     {/* Tools */}
-                    <div>
-                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                            Available Tools
-                        </label>
-                        <div className="max-h-40 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-md p-2 space-y-1">
-                            {availableTools.map(tool => (
-                                <label
-                                    key={tool.name}
-                                    className="flex items-center gap-2 p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded cursor-pointer"
-                                >
-                                    <input
-                                        type="checkbox"
-                                        checked={selectedTools.has(tool.name)}
-                                        onChange={() => toggleTool(tool.name)}
-                                        className="rounded border-gray-300 dark:border-gray-600"
-                                    />
-                                    <span className="text-sm text-gray-900 dark:text-white">{tool.name}</span>
-                                    <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
-                                        - {tool.description}
-                                    </span>
-                                </label>
-                            ))}
-                        </div>
-                    </div>
+                    <ToolSelector
+                        availableTools={availableTools}
+                        selectedTools={selectedTools}
+                        setSelectedTools={setSelectedTools}
+                    />
                 </form>
 
                 <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-3">

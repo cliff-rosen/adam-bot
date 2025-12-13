@@ -51,14 +51,15 @@ const getMemoryTypeInfo = (type: MemoryType) => {
 };
 
 // Tool category tabs configuration
-type ToolTab = 'system' | 'search' | 'processing' | 'workflow' | 'integrations';
+type ToolTab = 'system' | 'search' | 'process' | 'workflow' | 'agents' | 'mail';
 
 const TOOL_TABS: { key: ToolTab; label: string; categories: string[] }[] = [
-    { key: 'system', label: 'System', categories: ['memory', 'assets'] },
+    { key: 'system', label: 'Sys', categories: ['memory', 'assets'] },
     { key: 'search', label: 'Search', categories: ['search', 'research'] },
-    { key: 'processing', label: 'Processing', categories: ['processing'] },
-    { key: 'workflow', label: 'Workflow', categories: ['workflow'] },
-    { key: 'integrations', label: 'Int', categories: ['integrations'] },
+    { key: 'process', label: 'Process', categories: ['processing'] },
+    { key: 'workflow', label: 'Flow', categories: ['workflow'] },
+    { key: 'agents', label: 'Agents', categories: ['agents'] },
+    { key: 'mail', label: 'Mail', categories: ['integrations', 'email'] },
 ];
 
 interface ToolsSectionProps {
