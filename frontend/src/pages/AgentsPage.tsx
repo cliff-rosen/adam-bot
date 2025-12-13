@@ -14,6 +14,7 @@ export default function AgentsPage() {
     const [error, setError] = useState<string | null>(null);
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [availableTools, setAvailableTools] = useState<ToolInfo[]>([]);
+    const [refreshCounter, setRefreshCounter] = useState(0);
 
     // Load agents and tools on mount
     useEffect(() => {
@@ -49,7 +50,8 @@ export default function AgentsPage() {
     const handleSelectAgent = useCallback(async (agentId: number) => {
         try {
             const detail = await agentApi.get(agentId);
-            setSelectedAgent(detail);
+            // Force React to see the change by spreading to create new object reference
+            setSelectedAgent({ ...detail, recent_runs: [...detail.recent_runs] });
         } catch (err) {
             console.error('Failed to load agent details:', err);
         }
@@ -337,7 +339,10 @@ export default function AgentsPage() {
                             <div className="flex items-center justify-between mb-2">
                                 <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Runs</h2>
                                 <button
-                                    onClick={() => handleSelectAgent(selectedAgent.agent_id)}
+                                    onClick={async () => {
+                                        await handleSelectAgent(selectedAgent.agent_id);
+                                        setRefreshCounter(c => c + 1);
+                                    }}
                                     className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                                     title="Refresh runs"
                                 >
@@ -350,7 +355,7 @@ export default function AgentsPage() {
                                 <div className="space-y-2">
                                     {selectedAgent.recent_runs.map(run => (
                                         <RunCard
-                                            key={run.run_id}
+                                            key={`${run.run_id}-${refreshCounter}`}
                                             run={run}
                                             formatRelativeTime={formatRelativeTime}
                                         />
