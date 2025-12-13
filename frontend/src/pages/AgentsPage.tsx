@@ -334,7 +334,16 @@ export default function AgentsPage() {
 
                         {/* Recent Runs */}
                         <div>
-                            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Recent Runs</h2>
+                            <div className="flex items-center justify-between mb-2">
+                                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Recent Runs</h2>
+                                <button
+                                    onClick={() => handleSelectAgent(selectedAgent.agent_id)}
+                                    className="p-1.5 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
+                                    title="Refresh runs"
+                                >
+                                    <ArrowPathIcon className="h-5 w-5" />
+                                </button>
+                            </div>
                             {selectedAgent.recent_runs.length === 0 ? (
                                 <div className="text-gray-500 dark:text-gray-400 py-4">No runs yet</div>
                             ) : (

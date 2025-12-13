@@ -404,6 +404,30 @@ class AutonomousAgentService:
             else:
                 run.status = AgentRunStatus.COMPLETED
 
+                # Automatically save the agent's output as an asset
+                if result_text and result_text.strip():
+                    from datetime import date
+                    asset_name = f"{agent.name} - {date.today().strftime('%Y-%m-%d')} (Run #{run_id})"
+                    asset = Asset(
+                        user_id=agent.user_id,
+                        name=asset_name,
+                        asset_type=AssetType.DOCUMENT,
+                        content=result_text,
+                        description=f"Automatic output from agent '{agent.name}'",
+                        created_by_agent_id=agent.agent_id,
+                        agent_run_id=run_id
+                    )
+                    self.db.add(asset)
+                    run.assets_created = (run.assets_created or 0) + 1
+                    agent.total_assets_created = (agent.total_assets_created or 0) + 1
+
+                    self.log_event(
+                        run_id,
+                        AgentRunEventType.STATUS,
+                        f"Saved output as asset: {asset_name}",
+                        {"asset_name": asset_name, "content_length": len(result_text)}
+                    )
+
             # Update agent stats
             agent.total_runs += 1
             agent.last_run_at = datetime.utcnow()
