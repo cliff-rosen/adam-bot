@@ -60,6 +60,17 @@ export default function TablePayloadView({ payload, onSaveAsAsset }: TablePayloa
         setIsComputing(true);
         setComputeProgress({ completed: 0, total: rows.length, status: 'Starting...' });
 
+        // Add the column immediately so it appears right away
+        const newColumn: TableColumn = {
+            key: config.key,
+            label: config.name,
+            type: config.type,
+            sortable: true,
+            filterable: true,
+            computed: true
+        };
+        setColumns(prev => [...prev, newColumn]);
+
         try {
             const token = localStorage.getItem('authToken');
             const response = await fetch(`${settings.apiUrl}/api/table/compute-column`, {
@@ -86,7 +97,6 @@ export default function TablePayloadView({ payload, onSaveAsAsset }: TablePayloa
 
             const decoder = new TextDecoder();
             let buffer = '';
-            const updatedRows = [...rows];
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -107,23 +117,12 @@ export default function TablePayloadView({ payload, onSaveAsAsset }: TablePayloa
                                     status: data.message || `Processing ${data.completed}/${data.total}...`
                                 });
                             } else if (data.type === 'row_result') {
-                                // Update the specific row with the computed value
-                                updatedRows[data.row_index] = {
-                                    ...updatedRows[data.row_index],
-                                    [config.key]: data.value
-                                };
-                            } else if (data.type === 'complete') {
-                                // Add the new column definition
-                                const newColumn: TableColumn = {
-                                    key: config.key,
-                                    label: config.name,
-                                    type: config.type,
-                                    sortable: true,
-                                    filterable: true,
-                                    computed: true
-                                };
-                                setColumns(prev => [...prev, newColumn]);
-                                setRows(updatedRows);
+                                // Update the specific row immediately as results come in
+                                setRows(prev => prev.map((row, idx) =>
+                                    idx === data.row_index
+                                        ? { ...row, [config.key]: data.value }
+                                        : row
+                                ));
                             } else if (data.type === 'error') {
                                 throw new Error(data.message);
                             }
@@ -135,7 +134,8 @@ export default function TablePayloadView({ payload, onSaveAsAsset }: TablePayloa
             }
         } catch (error) {
             console.error('Error computing column:', error);
-            // Could show an error toast here
+            // Remove the column if there was an error
+            setColumns(prev => prev.filter(c => c.key !== config.key));
         } finally {
             setIsComputing(false);
             setComputeProgress(null);
@@ -413,28 +413,23 @@ export default function TablePayloadView({ payload, onSaveAsAsset }: TablePayloa
                 </div>
             )}
 
-            {/* Computing progress indicator */}
+            {/* Computing progress bar - non-blocking, shows at bottom */}
             {isComputing && computeProgress && (
-                <div className="absolute inset-0 bg-black/20 flex items-center justify-center">
-                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 max-w-sm mx-4">
-                        <div className="flex items-center gap-3 mb-3">
-                            <SparklesIcon className="h-5 w-5 text-teal-500 animate-pulse" />
-                            <span className="font-medium text-gray-900 dark:text-white">
-                                Computing Column
-                            </span>
+                <div className="absolute bottom-0 left-0 right-0 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 px-4 py-2">
+                    <div className="flex items-center gap-3">
+                        <SparklesIcon className="h-4 w-4 text-teal-500 animate-pulse flex-shrink-0" />
+                        <div className="flex-1">
+                            <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400 mb-1">
+                                <span>Computing column...</span>
+                                <span>{computeProgress.completed} / {computeProgress.total}</span>
+                            </div>
+                            <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5">
+                                <div
+                                    className="bg-teal-500 h-1.5 rounded-full transition-all duration-150"
+                                    style={{ width: `${(computeProgress.completed / computeProgress.total) * 100}%` }}
+                                />
+                            </div>
                         </div>
-                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
-                            {computeProgress.status}
-                        </p>
-                        <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                            <div
-                                className="bg-teal-500 h-2 rounded-full transition-all duration-300"
-                                style={{ width: `${(computeProgress.completed / computeProgress.total) * 100}%` }}
-                            />
-                        </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-2 text-center">
-                            {computeProgress.completed} / {computeProgress.total} rows
-                        </p>
                     </div>
                 </div>
             )}
