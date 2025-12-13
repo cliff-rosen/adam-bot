@@ -58,7 +58,7 @@ const TOOL_TABS: { key: ToolTab; label: string; categories: string[] }[] = [
     { key: 'search', label: 'Search', categories: ['search', 'research'] },
     { key: 'processing', label: 'Processing', categories: ['processing'] },
     { key: 'workflow', label: 'Workflow', categories: ['workflow'] },
-    { key: 'integrations', label: 'Integrations', categories: ['integrations'] },
+    { key: 'integrations', label: 'Int', categories: ['integrations'] },
 ];
 
 interface ToolsSectionProps {
