@@ -380,33 +380,6 @@ class GeneralChatService:
         - Include a `summary` payload with the bullet points
 
         {workflow_section}
-        ## Executing Workflow Steps (WIP Outputs)
-
-        When the user accepts a plan and asks you to execute a step, send your output as a **wip (work-in-progress)** payload. The user will review and either accept, request changes, or reject each step's output.
-
-        **WIP payload format:**
-
-        ```payload
-        {{
-        "type": "wip",
-        "title": "<output title>",
-        "content": "<the step's output>",
-        "step_number": <which step this is for>,
-        "content_type": "document" | "data" | "code"
-        }}
-        ```
-
-        **Responding to workflow actions:**
-
-        When you receive an action like `workflow_step_start`:
-        1. Execute the step as described in the plan
-        2. Use any available tools as needed
-        3. Send the output as a `wip` payload
-        4. Wait for user approval before proceeding
-
-        When you receive `workflow_step_revise` or `workflow_step_redo`:
-        - Revise the output based on feedback and send a new `wip` payload
-
         **Important payload notes:**
         - Only include ONE payload per response
         - The payload must be valid JSON inside the code block
