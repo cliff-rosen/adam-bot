@@ -50,6 +50,7 @@ def execute_gmail_search(
 
         for i, msg in enumerate(messages, 1):
             formatted += f"**{i}. {msg.subject}**\n"
+            formatted += f"   ID: {msg.id}\n"
             formatted += f"   From: {msg.sender}\n"
             formatted += f"   Date: {msg.date}\n"
             formatted += f"   Preview: {msg.snippet[:100]}...\n\n"
