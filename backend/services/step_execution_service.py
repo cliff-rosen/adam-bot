@@ -3,31 +3,50 @@ Step Execution Service
 
 A lightweight agent that executes individual workflow steps with fresh context.
 Streams status updates via SSE for real-time feedback.
+
+Uses the generic agent_loop for the agentic processing.
 """
 
-from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple
+from typing import Any, Dict, List, Optional, AsyncGenerator
 from dataclasses import dataclass, field
+from datetime import datetime
 from sqlalchemy.orm import Session
 import anthropic
-import asyncio
 import os
 import logging
 import json
 
-from tools import get_all_tools, ToolResult, ToolProgress, execute_streaming_tool, execute_tool
+from tools import get_all_tools
+from services.agent_loop import (
+    run_agent_loop,
+    CancellationToken,
+    AgentEvent,
+    AgentThinking,
+    AgentTextDelta,
+    AgentToolStart,
+    AgentToolProgress,
+    AgentToolComplete,
+    AgentComplete,
+    AgentCancelled,
+    AgentError,
+)
 
 logger = logging.getLogger(__name__)
 
 STEP_MODEL = "claude-sonnet-4-20250514"
 STEP_MAX_TOKENS = 4096
-MAX_TOOL_ITERATIONS = 10  # Allow more iterations for complex tasks
+MAX_TOOL_ITERATIONS = 10
 
+
+# =============================================================================
+# Data Classes
+# =============================================================================
 
 @dataclass
 class StepInputSource:
     """Input from a single source."""
     content: str
-    data: Optional[Any] = None  # Structured data when source produced 'data' content_type
+    data: Optional[Any] = None
 
 
 @dataclass
@@ -35,9 +54,9 @@ class StepAssignment:
     """What the main agent sends to the step executor."""
     step_number: int
     description: str
-    input_data: Dict[str, StepInputSource]  # Named inputs with content and optional structured data
+    input_data: Dict[str, StepInputSource]
     output_format: str
-    available_tools: List[str]  # Tool names to enable
+    available_tools: List[str]
 
 
 @dataclass
@@ -53,8 +72,8 @@ class StepResult:
     """What the step executor returns."""
     success: bool
     output: str
-    content_type: str  # 'document', 'data', 'code'
-    data: Optional[Any] = None  # Structured data when content_type is 'data'
+    content_type: str
+    data: Optional[Any] = None
     tool_calls: List[ToolCallRecord] = field(default_factory=list)
     error: Optional[str] = None
 
@@ -71,14 +90,12 @@ class ToolProgressUpdate:
 @dataclass
 class StepStatusUpdate:
     """A status update during step execution."""
-    status: str  # 'thinking', 'tool_start', 'tool_progress', 'tool_complete', 'complete', 'error'
+    status: str
     message: str
     tool_name: Optional[str] = None
     tool_input: Optional[Dict[str, Any]] = None
     tool_output: Optional[str] = None
-    # Tool progress (only on 'tool_progress')
     tool_progress: Optional[ToolProgressUpdate] = None
-    # Final result (only on 'complete')
     result: Optional[StepResult] = None
 
     def to_json(self) -> str:
@@ -91,7 +108,7 @@ class StepStatusUpdate:
         if self.tool_input:
             data["tool_input"] = self.tool_input
         if self.tool_output:
-            data["tool_output"] = self.tool_output[:500] if self.tool_output else None  # Truncate for status
+            data["tool_output"] = self.tool_output[:500] if self.tool_output else None
         if self.tool_progress:
             data["tool_progress"] = {
                 "stage": self.tool_progress.stage,
@@ -114,6 +131,10 @@ class StepStatusUpdate:
         return json.dumps(data)
 
 
+# =============================================================================
+# Service
+# =============================================================================
+
 class StepExecutionService:
     """Executes a single workflow step with fresh context."""
 
@@ -122,30 +143,24 @@ class StepExecutionService:
         self.user_id = user_id
         self.async_client = anthropic.AsyncAnthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
 
-    async def execute_streaming(self, assignment: StepAssignment) -> AsyncGenerator[StepStatusUpdate, None]:
+    async def execute_streaming(
+        self,
+        assignment: StepAssignment,
+        cancellation_token: Optional[CancellationToken] = None
+    ) -> AsyncGenerator[StepStatusUpdate, None]:
         """Execute a step assignment, yielding status updates along the way."""
         tool_calls: List[ToolCallRecord] = []
+        last_tool_data = None
 
         try:
             # Get tools
             all_tools = get_all_tools()
             enabled_set = set(assignment.available_tools)
-            tools = [t for t in all_tools if t.name in enabled_set]
-            tools_by_name = {t.name: t for t in tools}
-
-            anthropic_tools = [
-                {
-                    "name": t.name,
-                    "description": t.description,
-                    "input_schema": t.input_schema
-                }
-                for t in tools
-            ] if tools else None
+            tools = {t.name: t for t in all_tools if t.name in enabled_set}
 
             tool_list = ", ".join(assignment.available_tools) if assignment.available_tools else "None"
 
-            # Format input data as JSON for multi-source inputs
-            # Convert StepInputSource objects to dicts for JSON serialization
+            # Format input data
             input_dict = {}
             for key, source in assignment.input_data.items():
                 input_dict[key] = {
@@ -154,7 +169,6 @@ class StepExecutionService:
                 }
             input_section = json.dumps(input_dict, indent=2)
 
-            from datetime import datetime
             current_date = datetime.now().strftime("%Y-%m-%d")
 
             system_prompt = f"""You are a task execution agent. Execute the task and return ONLY the output.
@@ -186,164 +200,84 @@ class StepExecutionService:
 
             messages = [{"role": "user", "content": "Execute now. Return only the deliverable."}]
 
-            api_kwargs = {
-                "model": STEP_MODEL,
-                "max_tokens": STEP_MAX_TOKENS,
-                "temperature": 0.5,
-                "system": system_prompt,
-                "messages": messages
-            }
-            if anthropic_tools:
-                api_kwargs["tools"] = anthropic_tools
-
-            # Initial status
-            yield StepStatusUpdate(
-                status="thinking",
-                message="Starting step execution..."
-            )
-
-            # Execution loop
-            iteration = 0
+            # Run the agent loop
             collected_text = ""
-            last_tool_data = None  # Track structured data from last tool call
+            async for event in run_agent_loop(
+                client=self.async_client,
+                model=STEP_MODEL,
+                max_tokens=STEP_MAX_TOKENS,
+                max_iterations=MAX_TOOL_ITERATIONS,
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools,
+                db=self.db,
+                user_id=self.user_id,
+                context={},
+                cancellation_token=cancellation_token,
+                stream_text=False,
+                temperature=0.5
+            ):
+                # Map AgentEvent to StepStatusUpdate
+                update = self._map_event_to_status(event, tool_calls)
+                if update:
+                    yield update
 
-            while iteration < MAX_TOOL_ITERATIONS:
-                iteration += 1
-                logger.info(f"Step execution iteration {iteration}")
+                # Track state from events
+                if isinstance(event, AgentToolComplete):
+                    tool_calls.append(ToolCallRecord(
+                        tool_name=event.tool_name,
+                        input={},  # Not tracked in event
+                        output=event.result_text
+                    ))
+                    if event.result_data is not None:
+                        last_tool_data = event.result_data
 
-                response = await self.async_client.messages.create(**api_kwargs)
+                elif isinstance(event, (AgentComplete, AgentCancelled)):
+                    collected_text = event.text
 
-                # Collect text from this response
-                for block in response.content:
-                    if block.type == "text":
-                        collected_text += block.text
-
-                # Check for tool use
-                tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
-
-                if not tool_use_blocks:
-                    # No more tool calls - we're done
-                    break
-
-                # Handle tool call
-                tool_block = tool_use_blocks[0]
-                tool_name = tool_block.name
-                tool_input = tool_block.input
-                tool_use_id = tool_block.id
-
-                logger.info(f"Step agent tool call: {tool_name}")
-
-                # Yield tool start status
-                yield StepStatusUpdate(
-                    status="tool_start",
-                    message=f"Running {tool_name}...",
-                    tool_name=tool_name,
-                    tool_input=tool_input
-                )
-
-                # Execute the tool (may be streaming)
-                tool_config = tools_by_name.get(tool_name)
-                tool_result_str = ""
-                tool_result_data = None
-
-                if tool_config and tool_config.streaming:
-                    # Streaming tool - yields progress updates
-                    async for progress_or_result in self._execute_streaming_tool_call(
-                        tool_name, tool_input, tools_by_name
-                    ):
-                        if isinstance(progress_or_result, ToolProgress):
-                            # Yield progress update
-                            yield StepStatusUpdate(
-                                status="tool_progress",
-                                message=progress_or_result.message,
-                                tool_name=tool_name,
-                                tool_progress=ToolProgressUpdate(
-                                    stage=progress_or_result.stage,
-                                    message=progress_or_result.message,
-                                    data=progress_or_result.data,
-                                    progress=progress_or_result.progress
-                                )
-                            )
-                        elif isinstance(progress_or_result, tuple):
-                            # Final result (text, data)
-                            tool_result_str, tool_result_data = progress_or_result
-                else:
-                    # Non-streaming tool
-                    tool_result_str, tool_result_data = await self._execute_tool_call(
-                        tool_name, tool_input, tools_by_name
+                elif isinstance(event, AgentError):
+                    collected_text = event.text
+                    result = StepResult(
+                        success=False,
+                        output="",
+                        content_type="document",
+                        tool_calls=tool_calls,
+                        error=event.error
                     )
+                    yield StepStatusUpdate(
+                        status="error",
+                        message=event.error,
+                        result=result
+                    )
+                    return
 
-                # Track structured data from tool
-                if tool_result_data is not None:
-                    last_tool_data = tool_result_data
-
-                # Record the tool call
-                tool_calls.append(ToolCallRecord(
-                    tool_name=tool_name,
-                    input=tool_input,
-                    output=tool_result_str
-                ))
-
-                # Yield tool complete status
-                yield StepStatusUpdate(
-                    status="tool_complete",
-                    message=f"Completed {tool_name}",
-                    tool_name=tool_name,
-                    tool_output=tool_result_str
-                )
-
-                # Add to messages for next iteration
-                assistant_content = []
-                for block in response.content:
-                    if block.type == "text":
-                        assistant_content.append({"type": "text", "text": block.text})
-                    elif block.type == "tool_use":
-                        assistant_content.append({
-                            "type": "tool_use",
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input
-                        })
-
-                messages.append({"role": "assistant", "content": assistant_content})
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": tool_result_str
-                    }]
-                })
-                api_kwargs["messages"] = messages
-
-            # If we exited because of iteration limit but haven't got text output,
-            # make one more call asking for synthesis
+            # If we didn't get text but have tool calls, ask for synthesis
             if not collected_text.strip() and tool_calls:
                 yield StepStatusUpdate(
                     status="thinking",
                     message="Synthesizing results..."
                 )
 
-                # Add a message asking for synthesis
+                # Add synthesis request
                 messages.append({
                     "role": "user",
                     "content": "Now compile and return the final output based on all the information gathered. Return ONLY the deliverable content."
                 })
-                api_kwargs["messages"] = messages
 
-                # Remove tools to force text response
-                if "tools" in api_kwargs:
-                    del api_kwargs["tools"]
-
-                response = await self.async_client.messages.create(**api_kwargs)
+                # Call without tools to force text response
+                response = await self.async_client.messages.create(
+                    model=STEP_MODEL,
+                    max_tokens=STEP_MAX_TOKENS,
+                    temperature=0.5,
+                    system=system_prompt,
+                    messages=messages
+                )
                 for block in response.content:
-                    if block.type == "text":
+                    if hasattr(block, 'text'):
                         collected_text += block.text
 
-            # Determine content type from output
+            # Determine content type
             content_type = self._infer_content_type(collected_text, assignment.output_format)
-
-            # Include structured data if content_type is 'data' and we have tool data
             result_data = last_tool_data if content_type == 'data' else None
 
             # Yield final result
@@ -375,42 +309,55 @@ class StepExecutionService:
                 result=result
             )
 
-    async def _execute_tool_call(
+    def _map_event_to_status(
         self,
-        tool_name: str,
-        tool_input: Dict[str, Any],
-        tools_by_name: Dict[str, Any]
-    ) -> Tuple[str, Any]:
-        """Execute a non-streaming tool and return (result_text, result_data)."""
-        tool_config = tools_by_name.get(tool_name)
+        event: AgentEvent,
+        tool_calls: List[ToolCallRecord]
+    ) -> Optional[StepStatusUpdate]:
+        """Map an AgentEvent to a StepStatusUpdate."""
+        if isinstance(event, AgentThinking):
+            return StepStatusUpdate(
+                status="thinking",
+                message=event.message
+            )
 
-        if not tool_config:
-            return f"Unknown tool: {tool_name}", None
+        elif isinstance(event, AgentToolStart):
+            return StepStatusUpdate(
+                status="tool_start",
+                message=f"Running {event.tool_name}...",
+                tool_name=event.tool_name,
+                tool_input=event.tool_input
+            )
 
-        context = {}  # Fresh context for step execution
-        result_text, result_data = await execute_tool(tool_config, tool_input, self.db, self.user_id, context)
-        return result_text, result_data
+        elif isinstance(event, AgentToolProgress):
+            return StepStatusUpdate(
+                status="tool_progress",
+                message=event.progress.message,
+                tool_name=event.tool_name,
+                tool_progress=ToolProgressUpdate(
+                    stage=event.progress.stage,
+                    message=event.progress.message,
+                    data=event.progress.data,
+                    progress=event.progress.progress
+                )
+            )
 
-    async def _execute_streaming_tool_call(
-        self,
-        tool_name: str,
-        tool_input: Dict[str, Any],
-        tools_by_name: Dict[str, Any]
-    ) -> AsyncGenerator[ToolProgress | Tuple[str, Any], None]:
-        """Execute a streaming tool, yielding progress updates and final (text, data) result."""
-        tool_config = tools_by_name.get(tool_name)
+        elif isinstance(event, AgentToolComplete):
+            return StepStatusUpdate(
+                status="tool_complete",
+                message=f"Completed {event.tool_name}",
+                tool_name=event.tool_name,
+                tool_output=event.result_text
+            )
 
-        if not tool_config:
-            yield f"Unknown tool: {tool_name}", None
-            return
+        elif isinstance(event, AgentCancelled):
+            return StepStatusUpdate(
+                status="cancelled",
+                message="Step execution cancelled"
+            )
 
-        context = {}  # Fresh context for step execution
-        async for item in execute_streaming_tool(tool_config, tool_input, self.db, self.user_id, context):
-            if isinstance(item, ToolProgress):
-                yield item
-            elif isinstance(item, tuple):
-                # Final result (text, data)
-                yield item
+        # AgentComplete and AgentError are handled in the main loop
+        return None
 
     def _infer_content_type(self, output: str, output_format: str) -> str:
         """Infer content type from output and format hint."""

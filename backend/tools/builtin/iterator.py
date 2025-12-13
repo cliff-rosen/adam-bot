@@ -5,7 +5,6 @@ Processes each item in a list with an operation (LLM prompt, tool call, or agent
 Supports parallel execution for efficiency, or sequential for rate-limited APIs.
 """
 
-import asyncio
 import json
 import logging
 import os
@@ -20,6 +19,7 @@ from sqlalchemy.orm import Session
 from models import Asset, AssetType
 from tools.registry import ToolConfig, ToolResult, ToolProgress, register_tool, get_tool, get_all_tools
 from tools.executor import execute_tool_sync
+from services.agent_loop import run_agent_loop_sync, CancellationToken
 
 logger = logging.getLogger(__name__)
 
@@ -115,26 +115,22 @@ def _process_item_agent(
     tool_names: List[str],
     max_iterations: int,
     db: Session,
-    user_id: int
+    user_id: int,
+    cancellation_token: Optional[CancellationToken] = None
 ) -> ItemResult:
-    """Process a single item using an agentic loop with tools."""
-    try:
-        client = anthropic.Anthropic(api_key=os.getenv('ANTHROPIC_API_KEY'))
+    """Process a single item using an agentic loop with tools.
 
+    Uses the shared run_agent_loop_sync for the agentic processing.
+    """
+    try:
         # Build tool configs for allowed tools
-        available_tools = []
         tool_configs = {}
         for name in tool_names:
             config = get_tool(name)
             if config:
                 tool_configs[name] = config
-                available_tools.append({
-                    "name": config.name,
-                    "description": config.description,
-                    "input_schema": config.input_schema
-                })
 
-        if not available_tools:
+        if not tool_configs:
             return ItemResult(
                 item=item,
                 result="",
@@ -145,78 +141,43 @@ def _process_item_agent(
         # Substitute {item} in the prompt
         full_prompt = prompt.replace("{item}", item)
 
+        # Build system prompt for the agent
+        system_prompt = f"""You are a focused task agent. Complete the task for the given item.
+
+## Task
+{full_prompt}
+
+## Rules
+1. Use the available tools to complete the task
+2. Return your final answer as text when done
+3. Be concise and focused
+"""
+
         # Initialize conversation
-        messages = [{"role": "user", "content": full_prompt}]
+        messages = [{"role": "user", "content": "Execute the task now."}]
 
-        # Agentic loop
-        for iteration in range(max_iterations):
-            response = client.messages.create(
-                model=ITERATOR_MODEL,
-                max_tokens=ITERATOR_MAX_TOKENS,
-                tools=available_tools,
-                messages=messages
-            )
-
-            # Check stop reason
-            if response.stop_reason == "end_turn":
-                # Extract final text response
-                text_parts = [block.text for block in response.content if hasattr(block, 'text')]
-                final_text = "\n".join(text_parts) if text_parts else ""
-                return ItemResult(item=item, result=final_text, success=True)
-
-            elif response.stop_reason == "tool_use":
-                # Process tool calls
-                assistant_content = response.content
-                tool_results = []
-
-                for block in assistant_content:
-                    if block.type == "tool_use":
-                        tool_name = block.name
-                        tool_input = block.input
-                        tool_use_id = block.id
-
-                        # Execute the tool
-                        if tool_name in tool_configs:
-                            tool_config = tool_configs[tool_name]
-                            try:
-                                result = execute_tool_sync(tool_config, tool_input, db, user_id)
-                                tool_results.append({
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_use_id,
-                                    "content": result.text if result.success else f"Error: {result.error}"
-                                })
-                            except Exception as e:
-                                tool_results.append({
-                                    "type": "tool_result",
-                                    "tool_use_id": tool_use_id,
-                                    "content": f"Tool execution error: {str(e)}",
-                                    "is_error": True
-                                })
-                        else:
-                            tool_results.append({
-                                "type": "tool_result",
-                                "tool_use_id": tool_use_id,
-                                "content": f"Tool '{tool_name}' not available",
-                                "is_error": True
-                            })
-
-                # Add assistant message and tool results to conversation
-                messages.append({"role": "assistant", "content": assistant_content})
-                messages.append({"role": "user", "content": tool_results})
-
-            else:
-                # Unexpected stop reason
-                text_parts = [block.text for block in response.content if hasattr(block, 'text')]
-                final_text = "\n".join(text_parts) if text_parts else f"Stopped with reason: {response.stop_reason}"
-                return ItemResult(item=item, result=final_text, success=True)
-
-        # Max iterations reached
-        return ItemResult(
-            item=item,
-            result="",
-            success=False,
-            error=f"Max iterations ({max_iterations}) reached without completion"
+        # Run the agent loop using shared implementation
+        final_text, tool_calls, error = run_agent_loop_sync(
+            model=ITERATOR_MODEL,
+            max_tokens=ITERATOR_MAX_TOKENS,
+            max_iterations=max_iterations,
+            system_prompt=system_prompt,
+            messages=messages,
+            tools=tool_configs,
+            db=db,
+            user_id=user_id,
+            context={},
+            cancellation_token=cancellation_token,
+            temperature=0.5
         )
+
+        if error and error != "cancelled":
+            return ItemResult(item=item, result="", success=False, error=error)
+
+        if error == "cancelled":
+            return ItemResult(item=item, result=final_text, success=False, error="Cancelled")
+
+        return ItemResult(item=item, result=final_text, success=True)
 
     except Exception as e:
         logger.error(f"Agent processing error for item '{item}': {e}")
@@ -324,7 +285,9 @@ def execute_iterate(
         elif op_type == "tool":
             return index, _process_item_tool(item, op_tool_name, op_tool_params, db, user_id)
         elif op_type == "agent":
-            return index, _process_item_agent(item, op_prompt, op_tools, op_max_iterations, db, user_id)
+            return index, _process_item_agent(
+                item, op_prompt, op_tools, op_max_iterations, db, user_id, cancellation_token
+            )
         else:
             return index, ItemResult(item=item, result="", success=False, error=f"Unknown operation type: {op_type}")
 

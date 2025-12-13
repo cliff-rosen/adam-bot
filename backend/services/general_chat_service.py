@@ -2,52 +2,41 @@
 General Chat Service for CMR Bot
 
 Handles the primary agent's chat interactions with tool support.
+Uses the generic agent_loop for the agentic processing.
 """
 
 from typing import Dict, Any, AsyncGenerator, List, Optional, Tuple
+from datetime import datetime
 from sqlalchemy.orm import Session
 import anthropic
-import asyncio
 import os
 import logging
 
 from schemas.general_chat import ChatResponsePayload
-from tools import (
-    get_all_tools,
-    ToolResult,
-    ToolProgress,
-    execute_streaming_tool,
-    execute_tool
-)
+from tools import get_all_tools
 from services.conversation_service import ConversationService
 from services.memory_service import MemoryService
 from services.asset_service import AssetService
 from services.profile_service import ProfileService
+from services.agent_loop import (
+    run_agent_loop,
+    CancellationToken,
+    AgentEvent,
+    AgentThinking,
+    AgentTextDelta,
+    AgentToolStart,
+    AgentToolProgress,
+    AgentToolComplete,
+    AgentComplete,
+    AgentCancelled,
+    AgentError,
+)
 
 logger = logging.getLogger(__name__)
 
 CHAT_MODEL = "claude-sonnet-4-20250514"
 CHAT_MAX_TOKENS = 4096
 MAX_TOOL_ITERATIONS = 10
-
-
-class CancellationToken:
-    """Token for cancelling long-running operations."""
-
-    def __init__(self):
-        self._cancelled = False
-
-    @property
-    def is_cancelled(self) -> bool:
-        return self._cancelled
-
-    def cancel(self):
-        self._cancelled = True
-
-    def check(self) -> None:
-        """Raise CancelledError if cancelled."""
-        if self._cancelled:
-            raise asyncio.CancelledError("Operation was cancelled")
 
 
 class GeneralChatService:
@@ -91,7 +80,7 @@ class GeneralChatService:
             messages = self._load_message_history(conversation_id)
 
             # Get tools configuration
-            tools_by_name, anthropic_tools, tool_descriptions, tool_executor_context = self._get_tools_config(
+            tools_by_name, tool_descriptions, tool_executor_context = self._get_tools_config(
                 enabled_tools=request.enabled_tools,
                 conversation_id=conversation_id,
                 request_context=request.context
@@ -113,184 +102,55 @@ class GeneralChatService:
                 debug=None
             ).model_dump_json()
 
-            # Chat loop state
-            iteration = 0
+            # Run the agent loop
             collected_text = ""
             tool_call_history = []
 
-            api_kwargs = {
-                "model": CHAT_MODEL,
-                "max_tokens": CHAT_MAX_TOKENS,
-                "temperature": 0.7,
-                "system": system_prompt,
-                "messages": messages
-            }
-            if anthropic_tools:
-                api_kwargs["tools"] = anthropic_tools
+            async for event in run_agent_loop(
+                client=self.async_client,
+                model=CHAT_MODEL,
+                max_tokens=CHAT_MAX_TOKENS,
+                max_iterations=MAX_TOOL_ITERATIONS,
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools_by_name,
+                db=self.db,
+                user_id=self.user_id,
+                context=tool_executor_context,
+                cancellation_token=cancellation_token,
+                stream_text=True,
+                temperature=0.7
+            ):
+                # Map AgentEvent to SSE responses
+                sse_response = self._map_event_to_sse(event)
+                if sse_response:
+                    yield sse_response
 
-            while iteration < MAX_TOOL_ITERATIONS:
-                # Check for cancellation at start of each iteration
-                if cancellation_token.is_cancelled:
-                    logger.info("Request cancelled, exiting chat loop")
-                    break
+                # Track state from events
+                if isinstance(event, AgentTextDelta):
+                    collected_text += event.text
 
-                iteration += 1
-                logger.debug(f"Loop iteration {iteration}")
+                elif isinstance(event, AgentToolComplete):
+                    tool_call_history.append({
+                        "tool_name": event.tool_name,
+                        "input": {},  # Input is in AgentToolStart
+                        "output": event.result_data if event.result_data else event.result_text
+                    })
 
-                async with self.async_client.messages.stream(**api_kwargs) as stream:
-                    async for event in stream:
-                        # Check for cancellation during streaming
-                        if cancellation_token.is_cancelled:
-                            logger.info("Request cancelled during streaming")
-                            break
+                elif isinstance(event, (AgentComplete, AgentCancelled)):
+                    collected_text = event.text
+                    tool_call_history = event.tool_calls
 
-                        if hasattr(event, 'type'):
-                            if event.type == 'content_block_delta' and hasattr(event, 'delta'):
-                                if hasattr(event.delta, 'text'):
-                                    text = event.delta.text
-                                    collected_text += text
-                                    yield ChatStreamChunk(
-                                        token=text,
-                                        response_text=None,
-                                        payload=None,
-                                        status="streaming",
-                                        error=None,
-                                        debug=None
-                                    ).model_dump_json()
-
-                    # Exit early if cancelled
-                    if cancellation_token.is_cancelled:
-                        break
-
-                    final_response = await stream.get_final_message()
-                    response_content = final_response.content
-
-                # Exit if cancelled
-                if cancellation_token.is_cancelled:
-                    break
-
-                # Check for tool use
-                tool_use_blocks = [b for b in response_content if b.type == "tool_use"]
-
-                if not tool_use_blocks:
-                    logger.info(f"No tool call, response complete.")
-                    break
-
-                # Handle tool call
-                tool_block = tool_use_blocks[0]
-                tool_name = tool_block.name
-                tool_input = tool_block.input
-                tool_use_id = tool_block.id
-
-                logger.info(f"Tool call: {tool_name}")
-
-                # Emit started phase for frontend tool progress tracking
-                yield ChatStatusResponse(
-                    status=f"Running {tool_name}...",
-                    payload={"tool": tool_name, "phase": "started"},
-                    error=None,
-                    debug=None
-                ).model_dump_json()
-
-                # Execute tool - may yield progress updates for streaming tools
-                tool_result_str = ""
-                tool_output_data = None
-                tool_config = tools_by_name.get(tool_name)
-
-                if tool_config and tool_config.streaming:
-                    # Streaming tool - yield progress updates
-                    progress_count = 0
-                    got_final_result = False
-                    async for progress_or_result in self._execute_streaming_tool_call(
-                        tool_config, tool_input, tool_executor_context, cancellation_token
-                    ):
-                        # Check cancellation between progress updates
-                        if cancellation_token.is_cancelled:
-                            logger.info(f"Tool {tool_name} cancelled")
-                            break
-
-                        if isinstance(progress_or_result, ToolProgress):
-                            progress_count += 1
-                            # Yield progress update to frontend
-                            yield ChatStatusResponse(
-                                status=progress_or_result.message,
-                                payload={
-                                    "tool": tool_name,
-                                    "phase": "progress",
-                                    "stage": progress_or_result.stage,
-                                    "data": progress_or_result.data,
-                                    "progress": progress_or_result.progress
-                                },
-                                error=None,
-                                debug=None
-                            ).model_dump_json()
-                        elif isinstance(progress_or_result, tuple):
-                            # Final result (text, data)
-                            got_final_result = True
-                            tool_result_str, tool_output_data = progress_or_result
-                            logger.info(f"Streaming tool {tool_name} completed after {progress_count} progress updates")
-                        else:
-                            logger.warning(f"Unexpected item from streaming tool {tool_name}: {type(progress_or_result)}")
-
-                    if not got_final_result and not cancellation_token.is_cancelled:
-                        logger.error(f"Streaming tool {tool_name} ended without yielding final result!")
-                else:
-                    # Non-streaming tool
-                    tool_result_str, tool_output_data = await self._execute_tool_call(
-                        tool_name, tool_input, tools_by_name, tool_executor_context
-                    )
-
-                # If cancelled during tool execution, exit
-                if cancellation_token.is_cancelled:
-                    break
-
-                tool_call_history.append({
-                    "tool_name": tool_name,
-                    "input": tool_input,
-                    "output": tool_output_data if tool_output_data else tool_result_str
-                })
-
-                # Sanity check: detect if we accidentally got a generator object as string
-                if tool_result_str and ("<generator object" in tool_result_str or "Generator" in tool_result_str):
-                    logger.error(f"BUG: Tool {tool_name} returned generator object instead of result: {tool_result_str[:200]}")
-
-                # Log what the LLM will see as the tool result
-                result_preview = tool_result_str[:500] if tool_result_str else "(empty)"
-                if len(tool_result_str) > 500:
-                    result_preview += f"... (truncated, total {len(tool_result_str)} chars)"
-                logger.info(f"Tool result for {tool_name} (sending to LLM): {result_preview}")
-
-                yield ChatStatusResponse(
-                    status=f"Completed {tool_name}",
-                    payload={"tool": tool_name, "phase": "completed"},
-                    error=None,
-                    debug=None
-                ).model_dump_json()
-
-                # Add tool interaction to messages
-                assistant_content = self._format_assistant_content(response_content)
-                messages.append({"role": "assistant", "content": assistant_content})
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": tool_use_id,
-                        "content": tool_result_str
-                    }]
-                })
-                api_kwargs["messages"] = messages
-
-                # Add separator
-                separator = "\n\n"
-                collected_text += separator
-                yield ChatStreamChunk(
-                    token=separator,
-                    response_text=None,
-                    payload=None,
-                    status="streaming",
-                    error=None,
-                    debug=None
-                ).model_dump_json()
+                elif isinstance(event, AgentError):
+                    yield ChatStreamChunk(
+                        token=None,
+                        response_text=None,
+                        payload=None,
+                        status=None,
+                        error=f"Error: {event.error}",
+                        debug={"error_type": "agent_error"}
+                    ).model_dump_json()
+                    return
 
             # Save assistant message
             self.conv_service.add_message(
@@ -328,6 +188,69 @@ class GeneralChatService:
                 error=f"Service error: {str(e)}",
                 debug={"error_type": type(e).__name__}
             ).model_dump_json()
+
+    def _map_event_to_sse(self, event: AgentEvent) -> Optional[str]:
+        """Map an AgentEvent to an SSE JSON response."""
+        from routers.general_chat import ChatStreamChunk, ChatStatusResponse
+
+        if isinstance(event, AgentThinking):
+            return ChatStatusResponse(
+                status=event.message,
+                payload=None,
+                error=None,
+                debug=None
+            ).model_dump_json()
+
+        elif isinstance(event, AgentTextDelta):
+            return ChatStreamChunk(
+                token=event.text,
+                response_text=None,
+                payload=None,
+                status="streaming",
+                error=None,
+                debug=None
+            ).model_dump_json()
+
+        elif isinstance(event, AgentToolStart):
+            return ChatStatusResponse(
+                status=f"Running {event.tool_name}...",
+                payload={"tool": event.tool_name, "phase": "started"},
+                error=None,
+                debug=None
+            ).model_dump_json()
+
+        elif isinstance(event, AgentToolProgress):
+            return ChatStatusResponse(
+                status=event.progress.message,
+                payload={
+                    "tool": event.tool_name,
+                    "phase": "progress",
+                    "stage": event.progress.stage,
+                    "data": event.progress.data,
+                    "progress": event.progress.progress
+                },
+                error=None,
+                debug=None
+            ).model_dump_json()
+
+        elif isinstance(event, AgentToolComplete):
+            return ChatStatusResponse(
+                status=f"Completed {event.tool_name}",
+                payload={"tool": event.tool_name, "phase": "completed"},
+                error=None,
+                debug=None
+            ).model_dump_json()
+
+        elif isinstance(event, AgentCancelled):
+            return ChatStatusResponse(
+                status="Cancelled",
+                payload=None,
+                error=None,
+                debug=None
+            ).model_dump_json()
+
+        # AgentComplete and AgentError are handled in the main loop
+        return None
 
     # =========================================================================
     # Conversation Helpers
@@ -381,7 +304,6 @@ class GeneralChatService:
             include_profile: Whether to include user profile information
             has_workflow_builder: Whether the design_workflow tool is available
         """
-        from datetime import datetime
         current_date = datetime.now().strftime("%Y-%m-%d")
 
         context_section = self._build_context_section(user_message, include_profile)
@@ -664,7 +586,7 @@ class GeneralChatService:
         enabled_tools: Optional[List[str]] = None,
         conversation_id: Optional[int] = None,
         request_context: Optional[Dict[str, Any]] = None
-    ) -> Tuple[Dict[str, Any], Optional[List[Dict[str, Any]]], str, Dict[str, Any]]:
+    ) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
         """
         Get all tool-related configuration.
 
@@ -674,22 +596,12 @@ class GeneralChatService:
             request_context: Additional context from request (for tool executor context)
 
         Returns:
-            Tuple of (tools_by_name, anthropic_tools, tool_descriptions, tool_executor_context)
+            Tuple of (tools_by_name, tool_descriptions, tool_executor_context)
         """
         tools = self._get_filtered_tools(enabled_tools)
 
-        # Build lookup dict
+        # Build lookup dict (name -> ToolConfig)
         tools_by_name = {tool.name: tool for tool in tools}
-
-        # Build Anthropic API format
-        anthropic_tools = [
-            {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.input_schema
-            }
-            for tool in tools
-        ] if tools else None
 
         # Build descriptions for system prompt
         tool_descriptions = "\n".join([
@@ -703,7 +615,7 @@ class GeneralChatService:
             "conversation_id": conversation_id
         }
 
-        return tools_by_name, anthropic_tools, tool_descriptions, tool_executor_context
+        return tools_by_name, tool_descriptions, tool_executor_context
 
     def _get_filtered_tools(self, enabled_tools: Optional[List[str]] = None) -> List[Any]:
         """Get tools filtered by enabled list."""
@@ -712,50 +624,3 @@ class GeneralChatService:
             enabled_set = set(enabled_tools)
             return [t for t in all_tools if t.name in enabled_set]
         return all_tools
-
-    # =========================================================================
-    # Tool Execution
-    # =========================================================================
-
-    async def _execute_tool_call(
-        self,
-        tool_name: str,
-        tool_input: Dict[str, Any],
-        tools_by_name: Dict[str, Any],
-        context: Dict[str, Any]
-    ) -> Tuple[str, Any]:
-        """Execute a non-streaming tool and return (result_str, output_data)."""
-        tool_config = tools_by_name.get(tool_name)
-
-        if not tool_config:
-            return f"Unknown tool: {tool_name}", None
-
-        return await execute_tool(tool_config, tool_input, self.db, self.user_id, context)
-
-    async def _execute_streaming_tool_call(
-        self,
-        tool_config: Any,
-        tool_input: Dict[str, Any],
-        context: Dict[str, Any],
-        cancellation_token: Optional[CancellationToken] = None
-    ) -> AsyncGenerator[ToolProgress | Tuple[str, Any], None]:
-        """Execute a streaming tool, yielding progress updates and finally the result tuple."""
-        async for item in execute_streaming_tool(
-            tool_config, tool_input, self.db, self.user_id, context, cancellation_token
-        ):
-            yield item
-
-    def _format_assistant_content(self, response_content: list) -> list:
-        """Format response content blocks for Anthropic API."""
-        assistant_content = []
-        for block in response_content:
-            if block.type == "text":
-                assistant_content.append({"type": "text", "text": block.text})
-            elif block.type == "tool_use":
-                assistant_content.append({
-                    "type": "tool_use",
-                    "id": block.id,
-                    "name": block.name,
-                    "input": block.input
-                })
-        return assistant_content
