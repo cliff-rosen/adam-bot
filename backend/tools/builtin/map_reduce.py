@@ -90,7 +90,19 @@ def _map_item_tool(
         context = {}
         result = tool_config.executor(params, db, user_id, context)
 
-        if isinstance(result, ToolResult):
+        # Handle streaming tools (generators)
+        if hasattr(result, '__iter__') and hasattr(result, '__next__'):
+            # It's a generator - consume it to get the final ToolResult
+            final_result = None
+            for item_result in result:
+                if isinstance(item_result, ToolResult):
+                    final_result = item_result
+
+            if final_result:
+                return MapResult(item=item, result=final_result.text, success=True)
+            else:
+                return MapResult(item=item, result="", success=False, error="Tool returned no result")
+        elif isinstance(result, ToolResult):
             return MapResult(item=item, result=result.text, success=True)
         elif isinstance(result, str):
             return MapResult(item=item, result=result, success=True)
@@ -145,7 +157,19 @@ def _reduce_tool(
         context = {}
         result = tool_config.executor(params, db, user_id, context)
 
-        if isinstance(result, ToolResult):
+        # Handle streaming tools (generators)
+        if hasattr(result, '__iter__') and hasattr(result, '__next__'):
+            # It's a generator - consume it to get the final ToolResult
+            final_result = None
+            for item_result in result:
+                if isinstance(item_result, ToolResult):
+                    final_result = item_result
+
+            if final_result:
+                return final_result.text, True, None
+            else:
+                return "", False, "Tool returned no result"
+        elif isinstance(result, ToolResult):
             return result.text, True, None
         elif isinstance(result, str):
             return result, True, None

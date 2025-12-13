@@ -70,9 +70,7 @@ export default function AssetBrowserModal({
                    a.description?.toLowerCase().includes(searchQuery.toLowerCase());
         })
         .sort((a, b) => {
-            // In context first, then by date
-            if (a.is_in_context && !b.is_in_context) return -1;
-            if (!a.is_in_context && b.is_in_context) return 1;
+            // Sort by date only - don't re-sort by context to avoid items jumping around
             return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
         });
 
