@@ -6,6 +6,7 @@ Uses NCBI E-utilities API via the pubmed_service.
 """
 
 import logging
+from datetime import datetime, timedelta
 from typing import Any, Dict, Generator, List, Optional
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,32 @@ from tools.executor import run_async
 logger = logging.getLogger(__name__)
 
 MAX_PUBMED_RESULTS = 20
+
+
+def _calculate_date_range(date_range: str) -> tuple[str, str]:
+    """
+    Calculate start and end dates from a relative date range.
+    Returns dates in YYYY/MM/DD format for PubMed API.
+    """
+    today = datetime.now()
+    end_date = today.strftime("%Y/%m/%d")
+
+    if date_range == "last_week":
+        start = today - timedelta(days=7)
+    elif date_range == "last_month":
+        start = today - timedelta(days=30)
+    elif date_range == "last_3_months":
+        start = today - timedelta(days=90)
+    elif date_range == "last_6_months":
+        start = today - timedelta(days=180)
+    elif date_range == "last_year":
+        start = today - timedelta(days=365)
+    else:
+        # Default to last month if unknown
+        start = today - timedelta(days=30)
+
+    start_date = start.strftime("%Y/%m/%d")
+    return start_date, end_date
 
 
 def execute_pubmed_search(
@@ -33,9 +60,14 @@ def execute_pubmed_search(
     query = params.get("query", "")
     max_results = min(params.get("max_results", 10), MAX_PUBMED_RESULTS)
     sort_by = params.get("sort_by", "relevance")
+    date_range = params.get("date_range")
     start_date = params.get("start_date")
     end_date = params.get("end_date")
     date_type = params.get("date_type", "publication")
+
+    # If date_range is provided, calculate actual dates (overrides start_date/end_date)
+    if date_range:
+        start_date, end_date = _calculate_date_range(date_range)
 
     if not query:
         return ToolResult(text="Error: No search query provided")
@@ -213,13 +245,18 @@ PUBMED_SEARCH_TOOL = ToolConfig(
                 "default": "relevance",
                 "description": "Sort results by relevance or publication date"
             },
+            "date_range": {
+                "type": "string",
+                "enum": ["last_week", "last_month", "last_3_months", "last_6_months", "last_year"],
+                "description": "Relative date range filter. PREFERRED over start_date/end_date as it automatically calculates correct dates."
+            },
             "start_date": {
                 "type": "string",
-                "description": "Start date for filtering (YYYY/MM/DD format). Use with end_date."
+                "description": "Start date for filtering (YYYY/MM/DD format). Use date_range instead for relative dates."
             },
             "end_date": {
                 "type": "string",
-                "description": "End date for filtering (YYYY/MM/DD format). Use with start_date."
+                "description": "End date for filtering (YYYY/MM/DD format). Use date_range instead for relative dates."
             },
             "date_type": {
                 "type": "string",
