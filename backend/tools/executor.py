@@ -109,14 +109,19 @@ async def execute_streaming_tool(
                     # Generator finished - return_value is the final result
                     if return_value is not None:
                         if isinstance(return_value, ToolResult):
+                            logger.debug(f"Streaming tool completed with ToolResult: {return_value.text[:100] if return_value.text else '(empty)'}...")
                             yield (return_value.text, return_value.data)
                         elif isinstance(return_value, str):
+                            logger.debug(f"Streaming tool completed with string: {return_value[:100]}...")
                             yield (return_value, None)
                         else:
+                            logger.warning(f"Streaming tool returned unexpected type: {type(return_value)}")
                             yield (str(return_value), None)
                     elif final_result:
+                        logger.debug(f"Streaming tool completed with collected result: {final_result.text[:100] if final_result.text else '(empty)'}...")
                         yield (final_result.text, final_result.data)
                     else:
+                        logger.warning("Streaming tool completed with no result")
                         yield ("", None)
                     return
 

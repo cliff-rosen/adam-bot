@@ -93,10 +93,20 @@ def _map_item_tool(
         # Handle streaming tools (generators)
         if hasattr(result, '__iter__') and hasattr(result, '__next__'):
             # It's a generator - consume it to get the final ToolResult
+            # Note: Generators can RETURN a value (via StopIteration.value) or YIELD a ToolResult
             final_result = None
-            for item_result in result:
-                if isinstance(item_result, ToolResult):
-                    final_result = item_result
+            try:
+                while True:
+                    item_result = next(result)
+                    if isinstance(item_result, ToolResult):
+                        final_result = item_result
+            except StopIteration as e:
+                # The generator's return value is in e.value
+                if e.value is not None:
+                    if isinstance(e.value, ToolResult):
+                        final_result = e.value
+                    elif isinstance(e.value, str):
+                        final_result = ToolResult(text=e.value, data=None)
 
             if final_result:
                 return MapResult(item=item, result=final_result.text, success=True)
@@ -160,10 +170,20 @@ def _reduce_tool(
         # Handle streaming tools (generators)
         if hasattr(result, '__iter__') and hasattr(result, '__next__'):
             # It's a generator - consume it to get the final ToolResult
+            # Note: Generators can RETURN a value (via StopIteration.value) or YIELD a ToolResult
             final_result = None
-            for item_result in result:
-                if isinstance(item_result, ToolResult):
-                    final_result = item_result
+            try:
+                while True:
+                    item_result = next(result)
+                    if isinstance(item_result, ToolResult):
+                        final_result = item_result
+            except StopIteration as e:
+                # The generator's return value is in e.value
+                if e.value is not None:
+                    if isinstance(e.value, ToolResult):
+                        final_result = e.value
+                    elif isinstance(e.value, str):
+                        final_result = ToolResult(text=e.value, data=None)
 
             if final_result:
                 return final_result.text, True, None

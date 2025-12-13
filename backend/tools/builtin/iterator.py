@@ -109,18 +109,42 @@ def _process_item_tool(
         # Handle streaming tools (generators)
         if hasattr(result, '__iter__') and hasattr(result, '__next__'):
             # It's a generator - consume it to get the final ToolResult
+            # Note: Generators can RETURN a value (via StopIteration.value) or YIELD a ToolResult
             final_result = None
-            for item_result in result:
-                if isinstance(item_result, ToolResult):
-                    final_result = item_result
-                # ToolProgress items are ignored (we're not streaming from iterator)
+            try:
+                while True:
+                    item_result = next(result)
+                    if isinstance(item_result, ToolResult):
+                        final_result = item_result
+                    # ToolProgress items are ignored (we're not streaming from iterator)
+            except StopIteration as e:
+                # The generator's return value is in e.value
+                if e.value is not None:
+                    if isinstance(e.value, ToolResult):
+                        final_result = e.value
+                    elif isinstance(e.value, str):
+                        final_result = ToolResult(text=e.value, data=None)
 
             if final_result:
-                return ItemResult(item=item, result=final_result.text, success=True)
+                # Check if tool indicated failure in its data
+                tool_success = True
+                tool_error = None
+                if final_result.data and isinstance(final_result.data, dict):
+                    if final_result.data.get("success") is False:
+                        tool_success = False
+                        tool_error = final_result.data.get("error") or final_result.data.get("reason") or "Tool reported failure"
+                return ItemResult(item=item, result=final_result.text, success=tool_success, error=tool_error)
             else:
                 return ItemResult(item=item, result="", success=False, error="Tool returned no result")
         elif isinstance(result, ToolResult):
-            return ItemResult(item=item, result=result.text, success=True)
+            # Check if tool indicated failure in its data
+            tool_success = True
+            tool_error = None
+            if result.data and isinstance(result.data, dict):
+                if result.data.get("success") is False:
+                    tool_success = False
+                    tool_error = result.data.get("error") or result.data.get("reason") or "Tool reported failure"
+            return ItemResult(item=item, result=result.text, success=tool_success, error=tool_error)
         elif isinstance(result, str):
             return ItemResult(item=item, result=result, success=True)
         else:

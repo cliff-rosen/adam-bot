@@ -199,6 +199,8 @@ class GeneralChatService:
 
                 if tool_config and tool_config.streaming:
                     # Streaming tool - yield progress updates
+                    progress_count = 0
+                    got_final_result = False
                     async for progress_or_result in self._execute_streaming_tool_call(
                         tool_config, tool_input, tool_executor_context, cancellation_token
                     ):
@@ -208,6 +210,7 @@ class GeneralChatService:
                             break
 
                         if isinstance(progress_or_result, ToolProgress):
+                            progress_count += 1
                             # Yield progress update to frontend
                             yield ChatStatusResponse(
                                 status=progress_or_result.message,
@@ -223,7 +226,14 @@ class GeneralChatService:
                             ).model_dump_json()
                         elif isinstance(progress_or_result, tuple):
                             # Final result (text, data)
+                            got_final_result = True
                             tool_result_str, tool_output_data = progress_or_result
+                            logger.info(f"Streaming tool {tool_name} completed after {progress_count} progress updates")
+                        else:
+                            logger.warning(f"Unexpected item from streaming tool {tool_name}: {type(progress_or_result)}")
+
+                    if not got_final_result and not cancellation_token.is_cancelled:
+                        logger.error(f"Streaming tool {tool_name} ended without yielding final result!")
                 else:
                     # Non-streaming tool
                     tool_result_str, tool_output_data = await self._execute_tool_call(
@@ -239,6 +249,16 @@ class GeneralChatService:
                     "input": tool_input,
                     "output": tool_output_data if tool_output_data else tool_result_str
                 })
+
+                # Sanity check: detect if we accidentally got a generator object as string
+                if tool_result_str and ("<generator object" in tool_result_str or "Generator" in tool_result_str):
+                    logger.error(f"BUG: Tool {tool_name} returned generator object instead of result: {tool_result_str[:200]}")
+
+                # Log what the LLM will see as the tool result
+                result_preview = tool_result_str[:500] if tool_result_str else "(empty)"
+                if len(tool_result_str) > 500:
+                    result_preview += f"... (truncated, total {len(tool_result_str)} chars)"
+                logger.info(f"Tool result for {tool_name} (sending to LLM): {result_preview}")
 
                 yield ChatStatusResponse(
                     status=f"Completed {tool_name}",

@@ -4,6 +4,7 @@ import urllib.parse
 import logging
 import time
 import os
+import threading
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,24 @@ https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id=38004229&
 """
 PUBMED_API_SEARCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
 PUBMED_API_FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+
+# Global rate limiter for NCBI API (max 3 requests/sec without API key)
+_rate_limit_lock = threading.Lock()
+_last_request_time = 0.0
+_MIN_REQUEST_INTERVAL = 0.4  # 400ms between requests (2.5 req/sec, safely under 3/sec limit)
+
+
+def _wait_for_rate_limit():
+    """Ensure we don't exceed NCBI's rate limit by waiting if necessary."""
+    global _last_request_time
+    with _rate_limit_lock:
+        now = time.time()
+        elapsed = now - _last_request_time
+        if elapsed < _MIN_REQUEST_INTERVAL:
+            wait_time = _MIN_REQUEST_INTERVAL - elapsed
+            logger.debug(f"Rate limiting: waiting {wait_time:.2f}s before NCBI request")
+            time.sleep(wait_time)
+        _last_request_time = time.time()
 
 def _get_pubmed_max_results() -> int:
     """Helper function to get PubMed max results from settings."""
@@ -536,6 +555,8 @@ class PubMedService:
 
         for attempt in range(max_retries):
             try:
+                # Apply global rate limiting before request
+                _wait_for_rate_limit()
                 response = requests.get(url, params=params, headers=headers, timeout=30)
 
                 # Check for rate limiting
@@ -629,6 +650,8 @@ class PubMedService:
 
             for attempt in range(max_retries):
                 try:
+                    # Apply global rate limiting before request
+                    _wait_for_rate_limit()
                     response = requests.get(url, params=params, headers=headers, timeout=30)
                     response.raise_for_status()
                     xml = response.text
@@ -697,6 +720,8 @@ class PubMedService:
             params['api_key'] = self.api_key
 
         try:
+            # Apply global rate limiting before request
+            _wait_for_rate_limit()
             response = requests.get(url, params=params, timeout=30)
             response.raise_for_status()
             xml_content = response.text
