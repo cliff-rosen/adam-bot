@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     
     # SerpAPI settings
     SERPAPI_KEY: str = os.getenv("SERPAPI_KEY")
+
+    # NCBI API Key (optional - increases rate limits from 3/sec to 10/sec)
+    NCBI_API_KEY: str = os.getenv("NCBI_API_KEY", "")
     
     # Search Provider Limits
     GOOGLE_SCHOLAR_MAX_RESULTS_PER_CALL: int = int(os.getenv("GOOGLE_SCHOLAR_MAX_RESULTS_PER_CALL", "20"))

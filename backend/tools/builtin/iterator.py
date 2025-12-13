@@ -2,13 +2,14 @@
 Iterator tool for CMR Bot.
 
 Processes each item in a list with an operation (LLM prompt or tool call).
-Supports parallel execution for efficiency.
+Supports parallel execution for efficiency, or sequential for rate-limited APIs.
 """
 
 import asyncio
 import json
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Dict, Generator, List, Optional, Tuple
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 ITERATOR_MODEL = "claude-sonnet-4-20250514"
 ITERATOR_MAX_TOKENS = 1024
 DEFAULT_MAX_CONCURRENCY = 5
+DEFAULT_SEQUENTIAL_DELAY = 0.5  # Delay between items in sequential mode
 
 
 @dataclass
@@ -173,6 +175,8 @@ def execute_iterate(
     asset_id = params.get("asset_id")
     operation = params.get("operation", {})
     max_concurrency = params.get("max_concurrency", DEFAULT_MAX_CONCURRENCY)
+    sequential = params.get("sequential", False)
+    delay_between_items = params.get("delay_between_items", DEFAULT_SEQUENTIAL_DELAY)
 
     # Load items from asset if asset_id is provided
     if asset_id:
@@ -202,46 +206,37 @@ def execute_iterate(
     results: List[Optional[ItemResult]] = [None] * total
 
     # Send starting event with full items list for UI rendering
+    mode_str = "sequentially" if sequential else f"in parallel (max {max_concurrency})"
     yield ToolProgress(
         stage="starting",
-        message=f"Processing {total} items",
+        message=f"Processing {total} items {mode_str}",
         data={
             "total": total,
             "max_concurrency": max_concurrency,
+            "sequential": sequential,
             "items": items  # Full list for UI to render
         },
         progress=0.0
     )
 
-    # Process items in parallel
+    # Process items
     def process_item_with_index(index: int, item: str) -> Tuple[int, ItemResult]:
         if op_type == "llm":
             return index, _process_item_llm(item, op_prompt)
         else:
             return index, _process_item_tool(item, op_tool_name, op_tool_params, db, user_id)
 
-    # Use ThreadPoolExecutor for parallel processing
-    from concurrent.futures import as_completed
-
-    with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
-        # Submit all tasks with their indices
-        futures = {
-            executor.submit(process_item_with_index, idx, item): idx
-            for idx, item in enumerate(items)
-        }
-
-        # Process completed tasks as they finish (in completion order)
-        for future in as_completed(futures):
+    # Sequential processing for rate-limited APIs
+    if sequential:
+        for idx, item in enumerate(items):
             # Check for cancellation
             if cancellation_token and cancellation_token.is_cancelled:
                 logger.info("Iterator cancelled")
-                executor.shutdown(wait=False, cancel_futures=True)
                 yield ToolProgress(
                     stage="cancelled",
                     message=f"Cancelled after processing {completed}/{total} items",
                     data={"completed": completed, "total": total}
                 )
-                # Collect completed results
                 final_results = [r for r in results if r is not None]
                 return ToolResult(
                     text=f"Iterator cancelled after processing {completed}/{total} items",
@@ -252,18 +247,17 @@ def execute_iterate(
                 )
 
             try:
-                index, result = future.result(timeout=60)  # 60 second timeout per item
-                results[index] = result
+                _, result = process_item_with_index(idx, item)
+                results[idx] = result
                 completed += 1
 
-                # Send per-item completion event for live UI update
                 yield ToolProgress(
                     stage="item_complete",
                     message=f"Completed: {result.item[:50]}..." if len(result.item) > 50 else f"Completed: {result.item}",
                     data={
-                        "index": index,
+                        "index": idx,
                         "item": result.item,
-                        "result": result.result[:500] if result.result else "",  # Truncate for progress
+                        "result": result.result[:500] if result.result else "",
                         "success": result.success,
                         "error": result.error,
                         "completed": completed,
@@ -271,19 +265,23 @@ def execute_iterate(
                     },
                     progress=completed / total
                 )
+
+                # Delay before next item (except after last item)
+                if idx < len(items) - 1:
+                    time.sleep(delay_between_items)
+
             except Exception as e:
-                logger.error(f"Error processing item: {e}")
-                idx = futures[future]
-                error_result = ItemResult(item=items[idx], result="", success=False, error=str(e))
+                logger.error(f"Error processing item {item}: {e}")
+                error_result = ItemResult(item=item, result="", success=False, error=str(e))
                 results[idx] = error_result
                 completed += 1
 
                 yield ToolProgress(
                     stage="item_complete",
-                    message=f"Failed: {items[idx][:50]}..." if len(items[idx]) > 50 else f"Failed: {items[idx]}",
+                    message=f"Failed: {item[:50]}..." if len(item) > 50 else f"Failed: {item}",
                     data={
                         "index": idx,
-                        "item": items[idx],
+                        "item": item,
                         "result": "",
                         "success": False,
                         "error": str(e),
@@ -292,6 +290,84 @@ def execute_iterate(
                     },
                     progress=completed / total
                 )
+
+                # Still delay after failures to respect rate limits
+                if idx < len(items) - 1:
+                    time.sleep(delay_between_items)
+
+    else:
+        # Parallel processing with ThreadPoolExecutor
+        from concurrent.futures import as_completed
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            # Submit all tasks with their indices
+            futures = {
+                executor.submit(process_item_with_index, idx, item): idx
+                for idx, item in enumerate(items)
+            }
+
+            # Process completed tasks as they finish (in completion order)
+            for future in as_completed(futures):
+                # Check for cancellation
+                if cancellation_token and cancellation_token.is_cancelled:
+                    logger.info("Iterator cancelled")
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    yield ToolProgress(
+                        stage="cancelled",
+                        message=f"Cancelled after processing {completed}/{total} items",
+                        data={"completed": completed, "total": total}
+                    )
+                    # Collect completed results
+                    final_results = [r for r in results if r is not None]
+                    return ToolResult(
+                        text=f"Iterator cancelled after processing {completed}/{total} items",
+                        data={
+                            "partial": True,
+                            "results": [{"item": r.item, "result": r.result, "success": r.success, "error": r.error} for r in final_results]
+                        }
+                    )
+
+                try:
+                    index, result = future.result(timeout=60)  # 60 second timeout per item
+                    results[index] = result
+                    completed += 1
+
+                    # Send per-item completion event for live UI update
+                    yield ToolProgress(
+                        stage="item_complete",
+                        message=f"Completed: {result.item[:50]}..." if len(result.item) > 50 else f"Completed: {result.item}",
+                        data={
+                            "index": index,
+                            "item": result.item,
+                            "result": result.result[:500] if result.result else "",  # Truncate for progress
+                            "success": result.success,
+                            "error": result.error,
+                            "completed": completed,
+                            "total": total
+                        },
+                        progress=completed / total
+                    )
+                except Exception as e:
+                    logger.error(f"Error processing item: {e}")
+                    idx = futures[future]
+                    error_result = ItemResult(item=items[idx], result="", success=False, error=str(e))
+                    results[idx] = error_result
+                    completed += 1
+
+                    yield ToolProgress(
+                        stage="item_complete",
+                        message=f"Failed: {items[idx][:50]}..." if len(items[idx]) > 50 else f"Failed: {items[idx]}",
+                        data={
+                            "index": idx,
+                            "item": items[idx],
+                            "result": "",
+                            "success": False,
+                            "error": str(e),
+                            "completed": completed,
+                            "total": total
+                        },
+                        progress=completed / total
+                    )
 
     # Format final results (filter out any None values, though there shouldn't be any)
     final_results = [r for r in results if r is not None]
@@ -327,7 +403,7 @@ def execute_iterate(
 
 ITERATE_TOOL = ToolConfig(
     name="iterate",
-    description="Process each item in a list with an operation (LLM prompt or tool call). Use this to apply the same operation to multiple items in parallel. Items can be provided directly or loaded from a LIST asset.",
+    description="Process each item in a list with an operation (LLM prompt or tool call). Use this to apply the same operation to multiple items. Items can be provided directly or loaded from a LIST asset. Use sequential=true when calling rate-limited APIs like PubMed.",
     input_schema={
         "type": "object",
         "properties": {
@@ -366,8 +442,18 @@ ITERATE_TOOL = ToolConfig(
             },
             "max_concurrency": {
                 "type": "integer",
-                "description": "Maximum number of items to process in parallel (default: 5)",
+                "description": "Maximum number of items to process in parallel (default: 5). Ignored if sequential=true.",
                 "default": 5
+            },
+            "sequential": {
+                "type": "boolean",
+                "description": "If true, process items one at a time with delays between requests. Use this for rate-limited APIs like PubMed.",
+                "default": False
+            },
+            "delay_between_items": {
+                "type": "number",
+                "description": "Seconds to wait between items in sequential mode (default: 0.5). Only applies when sequential=true.",
+                "default": 0.5
             }
         },
         "required": ["operation"]

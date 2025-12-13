@@ -313,16 +313,27 @@ class PubMedService:
     def __init__(self, api_key: Optional[str] = None):
         """
         Initialize the PubMed service.
-        
+
         Args:
-            api_key: NCBI API key. If not provided, will look for NCBI_API_KEY env var.
+            api_key: NCBI API key. If not provided, will look in settings then env var.
         """
-        self.api_key = api_key or os.getenv("NCBI_API_KEY")
+        if api_key:
+            self.api_key = api_key
+        else:
+            # Try settings first, then env var
+            try:
+                from config.settings import settings
+                self.api_key = settings.NCBI_API_KEY if settings.NCBI_API_KEY else None
+            except Exception:
+                self.api_key = os.getenv("NCBI_API_KEY")
+
         self.search_url = PUBMED_API_SEARCH_URL
         self.fetch_url = PUBMED_API_FETCH_URL
-        
+
         if self.api_key:
             logger.info("Using NCBI API key for increased rate limits")
+        else:
+            logger.info("No NCBI API key configured - using rate-limited access (3 req/sec)")
     
     def _get_max_results_per_call(self) -> int:
         """Get the maximum number of results this provider can return per API call."""
@@ -519,52 +530,58 @@ class PubMedService:
             logger.error(f"URL too long ({len(full_url)} characters): Query is too complex")
             raise ValueError(f"Search query is too long ({len(full_url)} characters). PubMed has a URL length limit. Please simplify your search by reducing the number of terms.")
 
-        # Retry logic with exponential backoff
-        max_retries = 3
+        # Retry logic with exponential backoff for 429 and connection errors
+        max_retries = 5
         retry_delay = 1
 
         for attempt in range(max_retries):
             try:
-                response = requests.get(url, params, headers=headers, timeout=30)
-                break
+                response = requests.get(url, params=params, headers=headers, timeout=30)
+
+                # Check for rate limiting
+                if response.status_code == 429:
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)
+                        logger.warning(f"Rate limited by NCBI (429), waiting {wait_time}s before retry (attempt {attempt + 1}/{max_retries})...")
+                        time.sleep(wait_time)
+                        continue
+                    else:
+                        logger.error(f"Rate limit exceeded after {max_retries} retries")
+                        response.raise_for_status()
+
+                response.raise_for_status()
+
+                content_type = response.headers.get('content-type', '')
+                if 'application/json' not in content_type:
+                    logger.error(f"Expected JSON but got content-type: {content_type}")
+                    raise Exception(f"PubMed API returned non-JSON response. Content-Type: {content_type}")
+
+                if not response.text:
+                    logger.error("PubMed API returned empty response body")
+                    raise Exception("PubMed API returned empty response")
+
+                content = response.json()
+
+                if 'esearchresult' not in content:
+                    raise Exception("Invalid response format from PubMed API")
+
+                count = int(content['esearchresult']['count'])
+                ids = content['esearchresult']['idlist']
+
+                logger.info(f"Found {count} articles, returning {len(ids)} IDs")
+                return ids, count
+
             except requests.exceptions.RequestException as e:
                 if attempt < max_retries - 1:
-                    logger.warning(f"Request failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {retry_delay}s...")
-                    time.sleep(retry_delay)
-                    retry_delay *= 2
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"Request failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                    time.sleep(wait_time)
                 else:
-                    logger.error(f"Request failed after {max_retries} attempts: {e}")
-                    raise
-        
-        try:
-            response.raise_for_status()
-            
-            content_type = response.headers.get('content-type', '')
-            if 'application/json' not in content_type:
-                logger.error(f"Expected JSON but got content-type: {content_type}")
-                raise Exception(f"PubMed API returned non-JSON response. Content-Type: {content_type}")
-            
-            if not response.text:
-                logger.error("PubMed API returned empty response body")
-                raise Exception("PubMed API returned empty response")
-            
-            content = response.json()
-            
-            if 'esearchresult' not in content:
-                raise Exception("Invalid response format from PubMed API")
-                
-            count = int(content['esearchresult']['count'])
-            ids = content['esearchresult']['idlist']
-            
-            logger.info(f"Found {count} articles, returning {len(ids)} IDs")
-            return ids, count
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"HTTP error in PubMed search: {e}", exc_info=True)
-            raise Exception(f"PubMed API request failed: {str(e)}")
-        except Exception as e:
-            logger.error(f"Error in PubMed search: {e}", exc_info=True)
-            raise
+                    logger.error(f"HTTP error in PubMed search: {e}", exc_info=True)
+                    raise Exception(f"PubMed API request failed: {str(e)}")
+
+        # Should not reach here, but just in case
+        raise Exception("PubMed search failed after all retries")
     
     def get_articles_from_ids(self, ids: List[str]) -> List[PubMedArticle]:
         """
@@ -581,10 +598,17 @@ class PubMedService:
     def _get_articles_from_ids(self, ids: List[str]) -> List[PubMedArticle]:
         """Fetch full article data from PubMed IDs."""
         BATCH_SIZE = 100
+        # NCBI rate limit: 3 requests/sec without API key, 10/sec with key
+        REQUEST_DELAY = 0.1 if self.api_key else 0.4
+
         articles = []
         batch_size = BATCH_SIZE
         low = 0
         high = low + batch_size
+
+        headers = {
+            'User-Agent': 'CMRBot/1.0 (Research Assistant; Contact: admin@example.com)'
+        }
 
         while low < len(ids):
             logger.info(f"Processing articles {low} to {high}")
@@ -594,22 +618,57 @@ class PubMedService:
                 'db': 'pubmed',
                 'id': ','.join(id_batch)
             }
+
+            # Add API key if available
+            if self.api_key:
+                params['api_key'] = self.api_key
+
             xml = ""
-            try:
-                response = requests.get(url, params)
-                response.raise_for_status()
-                xml = response.text
-            except Exception as e:
-                logger.error(f"Error fetching articles batch {low}-{high}: {e}", exc_info=True)
+            max_retries = 3
+            retry_delay = 1
+
+            for attempt in range(max_retries):
+                try:
+                    response = requests.get(url, params=params, headers=headers, timeout=30)
+                    response.raise_for_status()
+                    xml = response.text
+                    break
+                except requests.exceptions.HTTPError as e:
+                    if e.response.status_code == 429:
+                        # Rate limited - wait longer and retry
+                        wait_time = retry_delay * (2 ** attempt)
+                        logger.warning(f"Rate limited by NCBI, waiting {wait_time}s before retry...")
+                        time.sleep(wait_time)
+                        if attempt == max_retries - 1:
+                            logger.error(f"Rate limit exceeded after {max_retries} retries for batch {low}-{high}")
+                            raise
+                    else:
+                        raise
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Fetch failed (attempt {attempt + 1}/{max_retries}): {e}. Retrying...")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        logger.error(f"Error fetching articles batch {low}-{high}: {e}", exc_info=True)
+                        raise
+
+            if not xml:
+                low += batch_size
+                high += batch_size
                 continue
 
             root = ET.fromstring(xml)
-            
+
             for article_node in root.findall(".//PubmedArticle"):
                 articles.append(PubMedArticle.from_xml(ET.tostring(article_node)))
 
             low += batch_size
             high += batch_size
+
+            # Rate limiting delay between batches
+            if low < len(ids):
+                time.sleep(REQUEST_DELAY)
 
         return articles
 
