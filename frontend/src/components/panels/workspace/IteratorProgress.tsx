@@ -54,7 +54,7 @@ export default function IteratorProgress({ progressUpdates }: IteratorProgressPr
             </div>
 
             {/* Items list */}
-            <div className="space-y-1 max-h-64 overflow-y-auto">
+            <div className="space-y-1">
                 {items.map((item, idx) => {
                     const completion = completedItems.get(idx);
                     const isPending = !completion;

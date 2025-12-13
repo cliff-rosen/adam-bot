@@ -15,7 +15,7 @@ export default function ToolProgress({ progressUpdates }: ToolProgressProps) {
     }
 
     return (
-        <div className="ml-6 space-y-1 max-h-64 overflow-y-auto">
+        <div className="ml-6 space-y-1">
             {progressUpdates.map((prog, idx) => (
                 <div
                     key={idx}

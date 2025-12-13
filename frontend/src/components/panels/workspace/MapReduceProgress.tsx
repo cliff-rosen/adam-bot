@@ -95,7 +95,7 @@ export default function MapReduceProgress({ progressUpdates }: MapReduceProgress
                     </div>
 
                     {/* Items list */}
-                    <div className="space-y-1 max-h-48 overflow-y-auto">
+                    <div className="space-y-1">
                         {items.map((item, idx) => {
                             const completion = completedItems.get(idx);
                             const isPending = !completion;
