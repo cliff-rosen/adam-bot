@@ -1,5 +1,5 @@
 import { XMarkIcon } from '@heroicons/react/24/solid';
-import { ToolCall, WorkspacePayload, WorkflowStep } from '../../types/chat';
+import { ToolCall, WorkspacePayload, WorkflowStep, WorkflowPlan } from '../../types/chat';
 import { ToolCallRecord, ToolProgressUpdate } from '../../lib/api';
 import {
     StepExecutingView,
@@ -10,6 +10,7 @@ import {
     ToolHistoryView,
     AgentPayloadView,
     TablePayloadView,
+    WorkflowPipelineView,
     payloadTypeConfig
 } from './workspace';
 
@@ -25,7 +26,8 @@ interface WorkspacePanelProps {
     onSaveAsAsset: (toolCall: ToolCall) => void;
     onSavePayloadAsAsset: (payload: WorkspacePayload, andClose?: boolean) => void;
     onPayloadEdit: (payload: WorkspacePayload) => void;
-    // Workflow callbacks
+    // Workflow state and callbacks
+    activeWorkflow?: WorkflowPlan | null;
     onAcceptPlan?: (payload: WorkspacePayload) => void;
     onRejectPlan?: () => void;
     onAcceptWip?: (payload: WorkspacePayload) => void;
@@ -33,6 +35,7 @@ interface WorkspacePanelProps {
     onRejectWip?: () => void;
     onAcceptFinal?: (payload: WorkspacePayload) => void;
     onDismissFinal?: () => void;
+    onAbandonWorkflow?: () => void;
     // Agent callbacks
     onAcceptAgent?: (payload: WorkspacePayload) => void;
     onRejectAgent?: () => void;
@@ -50,6 +53,7 @@ export default function WorkspacePanel({
     onSaveAsAsset,
     onSavePayloadAsAsset,
     onPayloadEdit,
+    activeWorkflow,
     onAcceptPlan,
     onRejectPlan,
     onAcceptWip,
@@ -57,16 +61,54 @@ export default function WorkspacePanel({
     onRejectWip,
     onAcceptFinal,
     onDismissFinal,
+    onAbandonWorkflow,
     onAcceptAgent,
     onRejectAgent
 }: WorkspacePanelProps) {
     const config = activePayload ? payloadTypeConfig[activePayload.type] : null;
 
+    // Check if we're in workflow mode (active workflow OR proposed plan)
+    const isWorkflowMode = activeWorkflow || (activePayload?.type === 'plan');
+    const isWorkflowRelatedPayload = activePayload?.type === 'plan' || activePayload?.type === 'wip' || activePayload?.type === 'final';
+
     // Determine what to show
-    const showExecuting = executingStep !== null;
-    const showPayload = activePayload && !selectedToolHistory && !showExecuting;
-    const showToolHistory = selectedToolHistory && selectedToolHistory.length > 0 && !showExecuting;
-    const showEmpty = !showPayload && !showToolHistory && !showExecuting;
+    const showWorkflowPipeline = isWorkflowMode || (isWorkflowRelatedPayload && !selectedToolHistory);
+    const showExecuting = executingStep !== null && !showWorkflowPipeline;
+    const showPayload = activePayload && !selectedToolHistory && !showExecuting && !showWorkflowPipeline;
+    const showToolHistory = selectedToolHistory && selectedToolHistory.length > 0 && !showExecuting && !showWorkflowPipeline;
+    const showEmpty = !showPayload && !showToolHistory && !showExecuting && !showWorkflowPipeline;
+
+    // For workflow pipeline, render without the standard header (it has its own)
+    if (showWorkflowPipeline) {
+        return (
+            <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950 p-4">
+                <WorkflowPipelineView
+                    // Proposed plan props
+                    proposedPlan={activePayload?.type === 'plan' ? activePayload : undefined}
+                    onAcceptPlan={onAcceptPlan}
+                    onRejectPlan={onRejectPlan}
+                    // Active workflow props
+                    workflow={activeWorkflow}
+                    executingStep={executingStep}
+                    stepStatus={stepStatus}
+                    stepToolCalls={stepToolCalls}
+                    currentToolName={currentToolName}
+                    currentToolProgress={currentToolProgress}
+                    // Step output review props
+                    stepOutput={activePayload?.type === 'wip' || activePayload?.type === 'final' ? activePayload : null}
+                    onAcceptStep={onAcceptWip}
+                    onEditStep={onEditWip}
+                    onRejectStep={onRejectWip}
+                    onPayloadEdit={onPayloadEdit}
+                    // Final workflow props
+                    onAcceptFinal={onAcceptFinal}
+                    onDismissFinal={onDismissFinal}
+                    // Abandon
+                    onAbandon={onAbandonWorkflow}
+                />
+            </div>
+        );
+    }
 
     return (
         <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950">
@@ -103,7 +145,7 @@ export default function WorkspacePanel({
             </div>
 
             {/* Workspace Content */}
-            <div className={`flex-1 ${showExecuting || (showPayload && (activePayload?.type === 'plan' || activePayload?.type === 'wip' || activePayload?.type === 'final' || activePayload?.type === 'agent_create' || activePayload?.type === 'agent_update' || activePayload?.type === 'table')) ? 'overflow-hidden flex flex-col' : 'overflow-y-auto p-4'}`}>
+            <div className={`flex-1 ${showExecuting || (showPayload && (activePayload?.type === 'agent_create' || activePayload?.type === 'agent_update' || activePayload?.type === 'table')) ? 'overflow-hidden flex flex-col' : 'overflow-y-auto p-4'}`}>
                 {/* Step Executing View */}
                 {showExecuting && (
                     <StepExecutingView
@@ -112,35 +154,6 @@ export default function WorkspacePanel({
                         stepToolCalls={stepToolCalls}
                         currentToolName={currentToolName}
                         currentToolProgress={currentToolProgress}
-                    />
-                )}
-
-                {/* Plan Payload View */}
-                {showPayload && activePayload.type === 'plan' && (
-                    <PlanPayloadView
-                        payload={activePayload}
-                        onAccept={onAcceptPlan || (() => {})}
-                        onReject={onRejectPlan || (() => {})}
-                    />
-                )}
-
-                {/* WIP Payload View */}
-                {showPayload && activePayload.type === 'wip' && (
-                    <WipPayloadView
-                        payload={activePayload}
-                        onAccept={onAcceptWip || (() => {})}
-                        onEdit={onEditWip || (() => {})}
-                        onReject={onRejectWip || (() => {})}
-                        onPayloadEdit={onPayloadEdit}
-                    />
-                )}
-
-                {/* Final Workflow Output View */}
-                {showPayload && activePayload.type === 'final' && (
-                    <FinalPayloadView
-                        payload={activePayload}
-                        onAccept={onAcceptFinal || (() => {})}
-                        onDismiss={onDismissFinal || (() => {})}
                     />
                 )}
 

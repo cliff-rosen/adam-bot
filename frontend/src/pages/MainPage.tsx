@@ -817,6 +817,7 @@ export default function MainPage() {
                     onSaveAsAsset={handleSaveToolOutputAsAsset}
                     onSavePayloadAsAsset={handleSavePayloadAsAsset}
                     onPayloadEdit={handlePayloadEdit}
+                    activeWorkflow={activeWorkflow}
                     onAcceptPlan={handleAcceptPlan}
                     onRejectPlan={handleRejectPlan}
                     onAcceptWip={handleAcceptWip}
@@ -824,6 +825,7 @@ export default function MainPage() {
                     onRejectWip={handleRejectWip}
                     onAcceptFinal={handleAcceptFinal}
                     onDismissFinal={handleDismissFinal}
+                    onAbandonWorkflow={handleAbandonWorkflow}
                     onAcceptAgent={handleAcceptAgent}
                     onRejectAgent={handleRejectAgent}
                 />
