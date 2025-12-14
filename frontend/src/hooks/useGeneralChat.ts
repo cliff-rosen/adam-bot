@@ -98,6 +98,16 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
             }, abortController.signal)) {
                 if (chunk.error) {
                     setError(chunk.error);
+                    // Add error as a visible message so the user knows what happened
+                    const errorMessage: GeneralChatMessage = {
+                        role: 'assistant',
+                        content: `**Error:** ${chunk.error}\n\nPlease try again or check your API configuration.`,
+                        timestamp: new Date().toISOString()
+                    };
+                    setMessages(prev => [...prev, errorMessage]);
+                    setStreamingText('');
+                    setStatusText(null);
+                    setActiveToolProgress(null);
                     break;
                 }
 

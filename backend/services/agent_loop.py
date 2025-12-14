@@ -358,8 +358,24 @@ async def run_agent_loop(
         yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
     except Exception as e:
         logger.error(f"Agent loop error: {e}", exc_info=True)
+
+        # Provide user-friendly error messages for known error types
+        error_str = str(e)
+        if "credit balance is too low" in error_str.lower():
+            user_error = "API credit balance is too low. Please add credits to your Anthropic account."
+        elif "rate limit" in error_str.lower() or "429" in error_str:
+            user_error = "Rate limit exceeded. Please wait a moment and try again."
+        elif "invalid_api_key" in error_str.lower() or "authentication" in error_str.lower():
+            user_error = "API authentication failed. Please check your API key configuration."
+        elif "timeout" in error_str.lower():
+            user_error = "Request timed out. Please try again."
+        elif "connection" in error_str.lower():
+            user_error = "Connection error. Please check your internet connection and try again."
+        else:
+            user_error = error_str
+
         yield AgentError(
-            error=str(e),
+            error=user_error,
             text=collected_text,
             tool_calls=tool_call_history
         )
