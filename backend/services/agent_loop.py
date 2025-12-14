@@ -14,7 +14,7 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple
+from typing import Any, AsyncGenerator, Callable, Dict, List, Optional, Tuple, Union
 
 import anthropic
 from sqlalchemy.orm import Session
@@ -99,6 +99,24 @@ class AgentError(AgentEvent):
 
 
 # =============================================================================
+# Internal Result Types (for helper generators)
+# =============================================================================
+
+@dataclass
+class _ModelResult:
+    """Final result from _call_model generator."""
+    response: Any
+    text: str
+
+
+@dataclass
+class _ToolsResult:
+    """Final result from _process_tools generator."""
+    tool_results: List[Dict]
+    tool_records: List[Dict]
+
+
+# =============================================================================
 # Cancellation Token
 # =============================================================================
 
@@ -122,7 +140,142 @@ class CancellationToken:
 
 
 # =============================================================================
-# Main Agent Loop (Async)
+# Helper: Call Model
+# =============================================================================
+
+async def _call_model(
+    client: anthropic.AsyncAnthropic,
+    api_kwargs: Dict,
+    stream_text: bool,
+    cancellation_token: CancellationToken
+) -> AsyncGenerator[Union[AgentEvent, _ModelResult], None]:
+    """
+    Call the model and yield events.
+
+    Yields:
+        AgentTextDelta events (if streaming)
+        AgentMessage event (if not streaming)
+        _ModelResult as final item with response and collected text
+    """
+    collected_text = ""
+
+    if stream_text:
+        async with client.messages.stream(**api_kwargs) as stream:
+            async for event in stream:
+                if cancellation_token.is_cancelled:
+                    raise asyncio.CancelledError("Cancelled during streaming")
+
+                if hasattr(event, 'type'):
+                    if event.type == 'content_block_delta' and hasattr(event, 'delta'):
+                        if hasattr(event.delta, 'text'):
+                            text = event.delta.text
+                            collected_text += text
+                            yield AgentTextDelta(text=text)
+
+            response = await stream.get_final_message()
+    else:
+        response = await client.messages.create(**api_kwargs)
+
+        for block in response.content:
+            if hasattr(block, 'text'):
+                collected_text += block.text
+
+        if collected_text:
+            yield AgentMessage(text=collected_text, iteration=0)
+
+    yield _ModelResult(response=response, text=collected_text)
+
+
+# =============================================================================
+# Helper: Process Tools
+# =============================================================================
+
+async def _process_tools(
+    tool_use_blocks: List,
+    tools: Dict[str, ToolConfig],
+    db: Session,
+    user_id: int,
+    context: Dict[str, Any],
+    cancellation_token: CancellationToken
+) -> AsyncGenerator[Union[AgentEvent, _ToolsResult], None]:
+    """
+    Process all tool calls and yield events.
+
+    Yields:
+        AgentToolStart, AgentToolProgress, AgentToolComplete events
+        _ToolsResult as final item with results and records
+    """
+    tool_results = []
+    tool_records = []
+
+    for tool_block in tool_use_blocks:
+        tool_name = tool_block.name
+        tool_input = tool_block.input
+        tool_use_id = tool_block.id
+
+        logger.info(f"Agent tool call: {tool_name}")
+
+        yield AgentToolStart(
+            tool_name=tool_name,
+            tool_input=tool_input,
+            tool_use_id=tool_use_id
+        )
+
+        # Execute tool
+        tool_config = tools.get(tool_name)
+        tool_result_str = ""
+        tool_result_data = None
+        tool_workspace_payload = None
+
+        if not tool_config:
+            tool_result_str = f"Unknown tool: {tool_name}"
+        elif tool_config.streaming:
+            async for progress_or_result in execute_streaming_tool(
+                tool_config, tool_input, db, user_id, context, cancellation_token
+            ):
+                if cancellation_token.is_cancelled:
+                    raise asyncio.CancelledError(f"Tool {tool_name} cancelled")
+
+                if isinstance(progress_or_result, ToolProgress):
+                    yield AgentToolProgress(tool_name=tool_name, progress=progress_or_result)
+                elif isinstance(progress_or_result, tuple):
+                    tool_result_str, tool_result_data, tool_workspace_payload = progress_or_result
+        else:
+            tool_result_str, tool_result_data, tool_workspace_payload = await execute_tool(
+                tool_config, tool_input, db, user_id, context
+            )
+
+        if cancellation_token.is_cancelled:
+            raise asyncio.CancelledError("Cancelled after tool execution")
+
+        # Record tool call
+        tool_record = {
+            "tool_name": tool_name,
+            "input": tool_input,
+            "output": tool_result_data if tool_result_data else tool_result_str
+        }
+        if tool_workspace_payload:
+            tool_record["workspace_payload"] = tool_workspace_payload
+        tool_records.append(tool_record)
+
+        # Collect result for message
+        tool_results.append({
+            "type": "tool_result",
+            "tool_use_id": tool_use_id,
+            "content": tool_result_str
+        })
+
+        yield AgentToolComplete(
+            tool_name=tool_name,
+            result_text=tool_result_str,
+            result_data=tool_result_data
+        )
+
+    yield _ToolsResult(tool_results=tool_results, tool_records=tool_records)
+
+
+# =============================================================================
+# Main Agent Loop
 # =============================================================================
 
 async def run_agent_loop(
@@ -161,193 +314,63 @@ async def run_agent_loop(
     Yields:
         AgentEvent subclasses representing loop progress
     """
-    if context is None:
-        context = {}
+    context = context or {}
+    cancellation_token = cancellation_token or CancellationToken()
 
-    if cancellation_token is None:
-        cancellation_token = CancellationToken()
-
-    # Build Anthropic tools format
-    anthropic_tools = [
-        {
-            "name": config.name,
-            "description": config.description,
-            "input_schema": config.input_schema
-        }
-        for config in tools.values()
-    ] if tools else None
-
-    # Log tool configuration
-    if anthropic_tools:
-        logger.info(f"Agent loop starting with {len(anthropic_tools)} tools: {[t['name'] for t in anthropic_tools]}")
-    else:
-        logger.warning("Agent loop starting with NO TOOLS - model will not be able to use tools!")
-
-    # API kwargs
-    api_kwargs = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "system": system_prompt,
-        "messages": messages
-    }
-    if anthropic_tools:
-        api_kwargs["tools"] = anthropic_tools
-
-    # State
-    iteration = 0
+    # Setup
+    api_kwargs = _build_api_kwargs(model, max_tokens, temperature, system_prompt, messages, tools)
     collected_text = ""
     tool_call_history: List[Dict[str, Any]] = []
 
     yield AgentThinking(message="Starting...")
 
     try:
-        while iteration < max_iterations:
-            # Check for cancellation at start of each iteration
+        for iteration in range(1, max_iterations + 1):
             if cancellation_token.is_cancelled:
-                logger.info("Agent loop cancelled")
                 yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
                 return
 
-            iteration += 1
             logger.debug(f"Agent loop iteration {iteration}")
 
-            if stream_text:
-                # Streaming mode - yield text deltas
-                async with client.messages.stream(**api_kwargs) as stream:
-                    async for event in stream:
-                        # Check for cancellation during streaming
-                        if cancellation_token.is_cancelled:
-                            logger.info("Agent cancelled during streaming")
-                            yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
-                            return
+            # 1. Call model
+            response = None
+            async for event in _call_model(client, api_kwargs, stream_text, cancellation_token):
+                if isinstance(event, _ModelResult):
+                    response = event.response
+                    collected_text += event.text
+                else:
+                    yield event
 
-                        # Yield the text deltas that the model streams back
-                        if hasattr(event, 'type'):
-                            if event.type == 'content_block_delta' and hasattr(event, 'delta'):
-                                if hasattr(event.delta, 'text'):
-                                    text = event.delta.text
-                                    collected_text += text
-                                    yield AgentTextDelta(text=text)
-
-                    response = await stream.get_final_message()
-            else:
-                # Non-streaming mode - just get the response
-                response = await client.messages.create(**api_kwargs)
-
-                # Collect text from response
-                iteration_text = ""
-                for block in response.content:
-                    if hasattr(block, 'text'):
-                        iteration_text += block.text
-                        collected_text += block.text
-
-                # Emit message event with what the LLM said
-                if iteration_text:
-                    yield AgentMessage(text=iteration_text, iteration=iteration)
-
-            # Check for cancellation after API call
             if cancellation_token.is_cancelled:
                 yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
                 return
 
-            # Check for tool use
+            # 2. Check for tool use
             tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
 
             if not tool_use_blocks:
-                # No tool calls - we're done
-                logger.info(f"Agent loop complete after {iteration} iterations (no tool_use blocks found)")
+                logger.info(f"Agent loop complete after {iteration} iterations")
                 yield AgentComplete(text=collected_text, tool_calls=tool_call_history)
                 return
 
-            # Handle ALL tool calls in this response
-            tool_results = []
-
-            for tool_block in tool_use_blocks:
-                tool_name = tool_block.name
-                tool_input = tool_block.input
-                tool_use_id = tool_block.id
-
-                logger.info(f"Agent tool call: {tool_name}")
-
-                yield AgentToolStart(
-                    tool_name=tool_name,
-                    tool_input=tool_input,
-                    tool_use_id=tool_use_id
-                )
-
-                # Execute tool
-                tool_config = tools.get(tool_name)
-                tool_result_str = ""
-                tool_result_data = None
-                tool_workspace_payload = None
-
-                if not tool_config:
-                    tool_result_str = f"Unknown tool: {tool_name}"
-                elif tool_config.streaming:
-                    # Streaming tool - yield progress updates
-                    async for progress_or_result in execute_streaming_tool(
-                        tool_config, tool_input, db, user_id, context, cancellation_token
-                    ):
-                        # Check cancellation between progress updates
-                        if cancellation_token.is_cancelled:
-                            logger.info(f"Tool {tool_name} cancelled")
-                            yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
-                            return
-
-                        if isinstance(progress_or_result, ToolProgress):
-                            logger.info(f"Yielding tool progress: {tool_name} - {progress_or_result.stage}: {progress_or_result.message}")
-                            yield AgentToolProgress(
-                                tool_name=tool_name,
-                                progress=progress_or_result
-                            )
-                        elif isinstance(progress_or_result, tuple):
-                            tool_result_str, tool_result_data, tool_workspace_payload = progress_or_result
+            # 3. Process tools
+            tool_results = None
+            async for event in _process_tools(
+                tool_use_blocks, tools, db, user_id, context, cancellation_token
+            ):
+                if isinstance(event, _ToolsResult):
+                    tool_results = event.tool_results
+                    tool_call_history.extend(event.tool_records)
                 else:
-                    # Non-streaming tool
-                    tool_result_str, tool_result_data, tool_workspace_payload = await execute_tool(
-                        tool_config, tool_input, db, user_id, context
-                    )
+                    yield event
 
-                # Check cancellation after tool execution
-                if cancellation_token.is_cancelled:
-                    yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
-                    return
-
-                # Record tool call
-                tool_call_record = {
-                    "tool_name": tool_name,
-                    "input": tool_input,
-                    "output": tool_result_data if tool_result_data else tool_result_str
-                }
-                if tool_workspace_payload:
-                    tool_call_record["workspace_payload"] = tool_workspace_payload
-                tool_call_history.append(tool_call_record)
-
-                # Collect tool result for the message
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tool_use_id,
-                    "content": tool_result_str
-                })
-
-                yield AgentToolComplete(
-                    tool_name=tool_name,
-                    result_text=tool_result_str,
-                    result_data=tool_result_data
-                )
-
-            # Add tool interaction to messages (all tool_use blocks and all tool_results)
-            assistant_content = _format_assistant_content(response.content)
-            messages.append({"role": "assistant", "content": assistant_content})
-            messages.append({"role": "user", "content": tool_results})
+            # 4. Update messages for next iteration
+            _append_tool_exchange(messages, response, tool_results)
             api_kwargs["messages"] = messages
 
-            # Add separator to collected text if streaming
             if stream_text:
-                separator = "\n\n"
-                collected_text += separator
-                yield AgentTextDelta(text=separator)
+                collected_text += "\n\n"
+                yield AgentTextDelta(text="\n\n")
 
         # Max iterations reached
         logger.warning(f"Agent loop reached max iterations ({max_iterations})")
@@ -357,33 +380,54 @@ async def run_agent_loop(
         yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
     except Exception as e:
         logger.error(f"Agent loop error: {e}", exc_info=True)
-
-        # Provide user-friendly error messages for known error types
-        error_str = str(e)
-        if "credit balance is too low" in error_str.lower():
-            user_error = "API credit balance is too low. Please add credits to your Anthropic account."
-        elif "rate limit" in error_str.lower() or "429" in error_str:
-            user_error = "Rate limit exceeded. Please wait a moment and try again."
-        elif "invalid_api_key" in error_str.lower() or "authentication" in error_str.lower():
-            user_error = "API authentication failed. Please check your API key configuration."
-        elif "timeout" in error_str.lower():
-            user_error = "Request timed out. Please try again."
-        elif "connection" in error_str.lower():
-            user_error = "Connection error. Please check your internet connection and try again."
-        else:
-            user_error = error_str
-
         yield AgentError(
-            error=user_error,
+            error=_format_error_message(e),
             text=collected_text,
             tool_calls=tool_call_history
         )
 
 
-def _format_assistant_content(response_content: list) -> list:
-    """Format response content blocks for Anthropic API."""
+# =============================================================================
+# Utility Functions
+# =============================================================================
+
+def _build_api_kwargs(
+    model: str,
+    max_tokens: int,
+    temperature: float,
+    system_prompt: str,
+    messages: List[Dict],
+    tools: Dict[str, ToolConfig]
+) -> Dict:
+    """Build kwargs for Anthropic API call."""
+    api_kwargs = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "system": system_prompt,
+        "messages": messages
+    }
+
+    if tools:
+        api_kwargs["tools"] = [
+            {
+                "name": config.name,
+                "description": config.description,
+                "input_schema": config.input_schema
+            }
+            for config in tools.values()
+        ]
+        logger.info(f"Agent loop with {len(tools)} tools: {list(tools.keys())}")
+    else:
+        logger.warning("Agent loop with NO TOOLS")
+
+    return api_kwargs
+
+
+def _append_tool_exchange(messages: List[Dict], response: Any, tool_results: List[Dict]):
+    """Append assistant content and tool results to messages."""
     assistant_content = []
-    for block in response_content:
+    for block in response.content:
         if block.type == "text":
             assistant_content.append({"type": "text", "text": block.text})
         elif block.type == "tool_use":
@@ -393,7 +437,27 @@ def _format_assistant_content(response_content: list) -> list:
                 "name": block.name,
                 "input": block.input
             })
-    return assistant_content
+
+    messages.append({"role": "assistant", "content": assistant_content})
+    messages.append({"role": "user", "content": tool_results})
+
+
+def _format_error_message(e: Exception) -> str:
+    """Convert exception to user-friendly error message."""
+    error_str = str(e)
+
+    if "credit balance is too low" in error_str.lower():
+        return "API credit balance is too low. Please add credits to your Anthropic account."
+    elif "rate limit" in error_str.lower() or "429" in error_str:
+        return "Rate limit exceeded. Please wait a moment and try again."
+    elif "invalid_api_key" in error_str.lower() or "authentication" in error_str.lower():
+        return "API authentication failed. Please check your API key configuration."
+    elif "timeout" in error_str.lower():
+        return "Request timed out. Please try again."
+    elif "connection" in error_str.lower():
+        return "Connection error. Please check your internet connection and try again."
+
+    return error_str
 
 
 # =============================================================================
@@ -446,14 +510,12 @@ def run_agent_loop_sync(
                 user_id=user_id,
                 context=context,
                 cancellation_token=cancellation_token,
-                stream_text=False,  # No streaming in sync mode
+                stream_text=False,
                 temperature=temperature
             ):
-                # Call event callback if provided
                 if on_event:
                     on_event(event)
 
-                # Extract final state from terminal events
                 if isinstance(event, AgentComplete):
                     final_text = event.text
                     final_tool_calls = event.tool_calls
@@ -466,18 +528,15 @@ def run_agent_loop_sync(
                     final_tool_calls = event.tool_calls
                     error = event.error
         finally:
-            # Properly close the client before the event loop closes
             await client.close()
 
         return final_text, final_tool_calls, error
 
-    # Run in a new event loop (safe in ThreadPoolExecutor threads)
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
         return loop.run_until_complete(_run())
     finally:
-        # Properly shutdown - especially important on Windows
         try:
             loop.run_until_complete(loop.shutdown_asyncgens())
         except Exception:
