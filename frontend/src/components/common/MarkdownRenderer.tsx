@@ -14,6 +14,7 @@ interface MarkdownRendererProps {
 
 // Regex to match [[tool:N]] markers
 const TOOL_MARKER_REGEX = /\[\[tool:(\d+)\]\]/g;
+const TOOL_MARKER_TEST_REGEX = /\[\[tool:\d+\]\]/;  // Non-global for .test()
 
 interface InlineToolChipProps {
     toolCall: ToolCall;
@@ -185,8 +186,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 }) => {
     const components = getMarkdownComponents(compact);
 
-    // If no tool history or no markers, render normally
-    if (!toolHistory || !TOOL_MARKER_REGEX.test(content)) {
+    // If no markers in content, render normally
+    if (!TOOL_MARKER_TEST_REGEX.test(content)) {
         return (
             <div className={`prose prose-gray dark:prose-invert max-w-none ${className}`}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
@@ -221,7 +222,7 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
 
         // Add the tool chip
         const toolIndex = parseInt(match[1], 10);
-        const toolCall = toolHistory[toolIndex];
+        const toolCall = toolHistory?.[toolIndex];
         if (toolCall) {
             parts.push(
                 <InlineToolChip
@@ -230,6 +231,18 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({
                     index={toolIndex}
                     onClick={onToolClick}
                 />
+            );
+        } else {
+            // Tool data not available (e.g., cancelled request) - show disabled chip
+            parts.push(
+                <span
+                    key={`tool-${toolIndex}-missing`}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 mx-1 text-xs font-medium rounded-full bg-gray-100 dark:bg-gray-700 text-gray-400 dark:text-gray-500"
+                    title="Tool data unavailable"
+                >
+                    <WrenchScrewdriverIcon className="h-3 w-3" />
+                    tool call
+                </span>
             );
         }
 
