@@ -5,7 +5,7 @@
 import {
     DocumentTextIcon, TableCellsIcon, CodeBracketIcon,
     ClipboardDocumentListIcon, PlayIcon, ArrowPathIcon, CheckCircleIcon,
-    CpuChipIcon, PencilSquareIcon, Squares2X2Icon
+    CpuChipIcon, PencilSquareIcon, Squares2X2Icon, BeakerIcon
 } from '@heroicons/react/24/solid';
 import { ComponentType } from 'react';
 
@@ -97,6 +97,14 @@ export const payloadTypeConfig: Record<string, PayloadTypeConfig> = {
         bg: 'bg-teal-50 dark:bg-teal-900/20',
         border: 'border-teal-200 dark:border-teal-800',
         label: 'Table',
+        editable: false
+    },
+    research: {
+        icon: BeakerIcon,
+        color: 'text-purple-500',
+        bg: 'bg-purple-50 dark:bg-purple-900/20',
+        border: 'border-purple-200 dark:border-purple-800',
+        label: 'Research',
         editable: false
     }
 };

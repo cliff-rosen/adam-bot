@@ -1,16 +1,16 @@
 import { XMarkIcon } from '@heroicons/react/24/solid';
-import { ToolCall, WorkspacePayload, WorkflowStep, WorkflowPlan } from '../../types/chat';
+import { ToolCall, WorkspacePayload, WorkflowStep, WorkflowPlan, ResearchWorkflow } from '../../types/chat';
 import { ToolCallRecord, ToolProgressUpdate } from '../../lib/api';
+import { WorkflowInstanceState, WorkflowHandlers } from '../../lib/workflows';
 import {
     StepExecutingView,
-    PlanPayloadView,
-    WipPayloadView,
-    FinalPayloadView,
     StandardPayloadView,
     ToolHistoryView,
     AgentPayloadView,
     TablePayloadView,
     WorkflowPipelineView,
+    ResearchWorkflowView,
+    WorkflowExecutionView,
     payloadTypeConfig
 } from './workspace';
 
@@ -39,6 +39,17 @@ interface WorkspacePanelProps {
     // Agent callbacks
     onAcceptAgent?: (payload: WorkspacePayload) => void;
     onRejectAgent?: () => void;
+    // Research workflow callbacks
+    onUpdateResearchWorkflow?: (workflow: ResearchWorkflow) => void;
+    onResearchProceed?: () => void;
+    onResearchRunRetrieval?: () => void;
+    onResearchPauseRetrieval?: () => void;
+    onResearchCompile?: () => void;
+    onResearchComplete?: () => void;
+    // Workflow engine props
+    workflowInstance?: WorkflowInstanceState | null;
+    workflowHandlers?: WorkflowHandlers | null;
+    onCloseWorkflowInstance?: () => void;
 }
 
 export default function WorkspacePanel({
@@ -63,20 +74,65 @@ export default function WorkspacePanel({
     onDismissFinal,
     onAbandonWorkflow,
     onAcceptAgent,
-    onRejectAgent
+    onRejectAgent,
+    onUpdateResearchWorkflow,
+    onResearchProceed,
+    onResearchRunRetrieval,
+    onResearchPauseRetrieval,
+    onResearchCompile,
+    onResearchComplete,
+    workflowInstance,
+    workflowHandlers,
+    onCloseWorkflowInstance: _onCloseWorkflowInstance
 }: WorkspacePanelProps) {
+    void _onCloseWorkflowInstance; // Reserved for close button in workflow view
     const config = activePayload ? payloadTypeConfig[activePayload.type] : null;
+
+    // Check if we're in workflow engine mode
+    const isWorkflowEngineMode = workflowInstance && workflowHandlers;
 
     // Check if we're in workflow mode (active workflow OR proposed plan)
     const isWorkflowMode = activeWorkflow || (activePayload?.type === 'plan');
     const isWorkflowRelatedPayload = activePayload?.type === 'plan' || activePayload?.type === 'wip' || activePayload?.type === 'final';
+    const isResearchWorkflow = activePayload?.type === 'research';
 
     // Determine what to show
-    const showWorkflowPipeline = isWorkflowMode || (isWorkflowRelatedPayload && !selectedToolHistory);
-    const showExecuting = executingStep !== null && !showWorkflowPipeline;
-    const showPayload = activePayload && !selectedToolHistory && !showExecuting && !showWorkflowPipeline;
-    const showToolHistory = selectedToolHistory && selectedToolHistory.length > 0 && !showExecuting && !showWorkflowPipeline;
-    const showEmpty = !showPayload && !showToolHistory && !showExecuting && !showWorkflowPipeline;
+    const showWorkflowEngine = isWorkflowEngineMode && !selectedToolHistory;
+    const showWorkflowPipeline = !showWorkflowEngine && (isWorkflowMode || (isWorkflowRelatedPayload && !selectedToolHistory));
+    const showResearchWorkflow = !showWorkflowEngine && isResearchWorkflow && !selectedToolHistory;
+    const showExecuting = !showWorkflowEngine && executingStep !== null && !showWorkflowPipeline && !showResearchWorkflow;
+    const showPayload = !showWorkflowEngine && activePayload && !selectedToolHistory && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow;
+    const showToolHistory = !showWorkflowEngine && selectedToolHistory && selectedToolHistory.length > 0 && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow;
+    const showEmpty = !showPayload && !showToolHistory && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow && !showWorkflowEngine;
+
+    // For workflow engine, render with WorkflowExecutionView
+    if (showWorkflowEngine && workflowInstance && workflowHandlers) {
+        return (
+            <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950">
+                <WorkflowExecutionView
+                    instanceState={workflowInstance}
+                    handlers={workflowHandlers}
+                />
+            </div>
+        );
+    }
+
+    // For research workflow, render with the ResearchWorkflowView
+    if (showResearchWorkflow && activePayload) {
+        return (
+            <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950">
+                <ResearchWorkflowView
+                    payload={activePayload}
+                    onUpdateWorkflow={onUpdateResearchWorkflow || (() => {})}
+                    onProceedToNextStage={onResearchProceed || (() => {})}
+                    onRunRetrieval={onResearchRunRetrieval || (() => {})}
+                    onPauseRetrieval={onResearchPauseRetrieval || (() => {})}
+                    onCompileFinal={onResearchCompile || (() => {})}
+                    onComplete={onResearchComplete || (() => {})}
+                />
+            </div>
+        );
+    }
 
     // For workflow pipeline, render without the standard header (it has its own)
     if (showWorkflowPipeline) {

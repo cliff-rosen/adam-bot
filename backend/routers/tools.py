@@ -7,7 +7,7 @@ Simple endpoints for testing backend services directly.
 import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -15,10 +15,69 @@ from models import User
 from routers.auth import get_current_user
 from services.pubmed_service import PubMedService
 from services.gmail_service import GmailService, GmailServiceError, NotConnectedError
+from tools import get_all_tools, get_tools_by_category
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
+
+
+# ============================================================================
+# Tool Registry API
+# ============================================================================
+
+class ToolInfo(BaseModel):
+    """Information about a registered tool."""
+    name: str
+    description: str
+    category: str
+    input_schema: Dict[str, Any]
+    streaming: bool
+
+
+class ToolListResponse(BaseModel):
+    """Response containing list of available tools."""
+    tools: List[ToolInfo]
+    categories: List[str]
+
+
+@router.get("/list", response_model=ToolListResponse)
+async def list_tools(
+    category: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+) -> ToolListResponse:
+    """
+    List all available tools with their documentation.
+
+    Optionally filter by category.
+    """
+    if category:
+        tools = get_tools_by_category(category)
+    else:
+        tools = get_all_tools()
+
+    # Get unique categories
+    all_tools = get_all_tools()
+    categories = sorted(set(t.category for t in all_tools))
+
+    tool_infos = [
+        ToolInfo(
+            name=tool.name,
+            description=tool.description,
+            category=tool.category,
+            input_schema=tool.input_schema,
+            streaming=tool.streaming
+        )
+        for tool in tools
+    ]
+
+    # Sort by category then name
+    tool_infos.sort(key=lambda t: (t.category, t.name))
+
+    return ToolListResponse(
+        tools=tool_infos,
+        categories=categories
+    )
 
 
 # ============================================================================

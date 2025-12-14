@@ -7,6 +7,33 @@
 import { api } from './index';
 
 // ============================================================================
+// Tool Registry Types
+// ============================================================================
+
+export interface ToolInfo {
+    name: string;
+    description: string;
+    category: string;
+    input_schema: {
+        type: string;
+        properties?: Record<string, {
+            type: string;
+            description?: string;
+            enum?: string[];
+            items?: { type: string };
+            default?: any;
+        }>;
+        required?: string[];
+    };
+    streaming: boolean;
+}
+
+export interface ToolListResponse {
+    tools: ToolInfo[];
+    categories: string[];
+}
+
+// ============================================================================
 // PubMed Search
 // ============================================================================
 
@@ -65,6 +92,15 @@ export interface GmailSearchResponse {
 }
 
 export const toolsApi = {
+    /**
+     * List all available tools with their documentation
+     */
+    async listTools(category?: string): Promise<ToolListResponse> {
+        const params = category ? { category } : {};
+        const response = await api.get('/api/tools/list', { params });
+        return response.data;
+    },
+
     /**
      * Search PubMed for articles
      */

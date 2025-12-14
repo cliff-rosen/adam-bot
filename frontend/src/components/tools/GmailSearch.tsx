@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { toolsApi, GmailMessage, GmailSearchResponse } from '../../lib/api/toolsApi';
-import { oauthApi, OAuthConnections } from '../../lib/api/oauthApi';
+import { oauthApi } from '../../lib/api/oauthApi';
 
 export default function GmailSearch() {
     const [query, setQuery] = useState('');

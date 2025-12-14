@@ -23,11 +23,12 @@ export interface ColumnConfig {
 }
 
 export default function AddColumnModal({
-    existingColumns,
+    existingColumns: _existingColumns,
     sampleRow,
     onSubmit,
     onClose
 }: AddColumnModalProps) {
+    void _existingColumns; // Reserved for column name validation
     const [name, setName] = useState('');
     const [type, setType] = useState<'text' | 'boolean' | 'number'>('text');
     const [prompt, setPrompt] = useState('');

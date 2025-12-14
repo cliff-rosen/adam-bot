@@ -3,10 +3,10 @@ import {
     WrenchScrewdriverIcon, XMarkIcon, PlusIcon, DocumentIcon,
     LightBulbIcon, BookmarkIcon, Cog6ToothIcon,
     ArrowsPointingOutIcon, UserIcon, HeartIcon, BuildingOfficeIcon,
-    FolderIcon, ClockIcon, XCircleIcon, CheckIcon, UserCircleIcon,
+    FolderIcon, ClockIcon, CheckIcon, UserCircleIcon,
     ChevronDownIcon, ChevronRightIcon, PencilIcon, PlayIcon,
     DocumentTextIcon, CodeBracketIcon, LinkIcon, TableCellsIcon,
-    PhotoIcon, ListBulletIcon, TagIcon
+    PhotoIcon, ListBulletIcon
 } from '@heroicons/react/24/solid';
 import { CheckCircleIcon as CheckCircleOutlineIcon } from '@heroicons/react/24/outline';
 import { Memory, MemoryType, Asset, AssetType, Profile, ToolInfo } from '../../lib/api';
@@ -28,9 +28,11 @@ interface ContextPanelProps {
     onToggleProfile: () => void;
     onExpandMemories: () => void;
     onExpandAssets: () => void;
+    onExpandTools: () => void;
     onEditProfile: () => void;
     onAbandonWorkflow: () => void;
     onViewStepOutput: (stepNumber: number) => void;
+    onOpenWorkflows?: () => void;
 }
 
 // Helper to get memory type icon and color
@@ -89,9 +91,10 @@ interface ToolsSectionProps {
     isExpanded: boolean;
     onToggleExpanded: () => void;
     onToggleTool: (toolId: string) => void;
+    onExpandTools: () => void;
 }
 
-function ToolsSection({ availableTools, enabledTools, isExpanded, onToggleExpanded, onToggleTool }: ToolsSectionProps) {
+function ToolsSection({ availableTools, enabledTools, isExpanded, onToggleExpanded, onToggleTool, onExpandTools }: ToolsSectionProps) {
     const [activeTab, setActiveTab] = useState<ToolTab>('system');
 
     const getToolsForTab = (tab: ToolTab) => {
@@ -130,21 +133,30 @@ function ToolsSection({ availableTools, enabledTools, isExpanded, onToggleExpand
     return (
         <div className="border-b border-gray-200 dark:border-gray-700">
             <div className="px-4 py-3 bg-gray-100 dark:bg-gray-800">
-                <button
-                    onClick={onToggleExpanded}
-                    className="flex items-center gap-2"
-                >
-                    {isExpanded ? (
-                        <ChevronDownIcon className="h-3 w-3 text-gray-500" />
-                    ) : (
-                        <ChevronRightIcon className="h-3 w-3 text-gray-500" />
-                    )}
-                    <WrenchScrewdriverIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-                    <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
-                        Tools
-                    </span>
-                    <span className="text-xs text-gray-500">({enabledCount}/{availableTools.length})</span>
-                </button>
+                <div className="flex items-center justify-between">
+                    <button
+                        onClick={onToggleExpanded}
+                        className="flex items-center gap-2"
+                    >
+                        {isExpanded ? (
+                            <ChevronDownIcon className="h-3 w-3 text-gray-500" />
+                        ) : (
+                            <ChevronRightIcon className="h-3 w-3 text-gray-500" />
+                        )}
+                        <WrenchScrewdriverIcon className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                        <span className="text-xs font-semibold text-gray-700 dark:text-gray-300 uppercase">
+                            Tools
+                        </span>
+                        <span className="text-xs text-gray-500">({enabledCount}/{availableTools.length})</span>
+                    </button>
+                    <button
+                        onClick={onExpandTools}
+                        className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700 rounded"
+                        title="Browse all tools"
+                    >
+                        <ArrowsPointingOutIcon className="h-4 w-4" />
+                    </button>
+                </div>
             </div>
 
             {isExpanded && (
@@ -243,9 +255,11 @@ export default function ContextPanel({
     onToggleProfile,
     onExpandMemories,
     onExpandAssets,
+    onExpandTools,
     onEditProfile,
     onAbandonWorkflow,
-    onViewStepOutput
+    onViewStepOutput,
+    onOpenWorkflows
 }: ContextPanelProps) {
     const [newMemoryInput, setNewMemoryInput] = useState('');
     const [activeTopTab, setActiveTopTab] = useState<TopTab>('config');
@@ -417,6 +431,21 @@ export default function ContextPanel({
                 {/* CONFIG TAB CONTENT */}
                 {activeTopTab === 'config' && (
                     <>
+                        {/* Workflows Section */}
+                        {onOpenWorkflows && (
+                            <div className="border-b border-gray-200 dark:border-gray-700">
+                                <div className="px-4 py-3">
+                                    <button
+                                        onClick={onOpenWorkflows}
+                                        className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors text-sm font-medium"
+                                    >
+                                        <PlayIcon className="h-4 w-4" />
+                                        Start Workflow
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Tools Section */}
                         <ToolsSection
                             availableTools={availableTools}
@@ -424,6 +453,7 @@ export default function ContextPanel({
                             isExpanded={isToolsExpanded}
                             onToggleExpanded={() => setIsToolsExpanded(!isToolsExpanded)}
                             onToggleTool={onToggleTool}
+                            onExpandTools={onExpandTools}
                         />
 
                         {/* Memories Section */}

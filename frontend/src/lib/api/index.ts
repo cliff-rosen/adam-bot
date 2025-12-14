@@ -117,3 +117,5 @@ export type { OAuthConnectionStatus, OAuthConnections, GoogleAuthResponse } from
 
 export { agentApi } from './agentApi';
 export type { Agent, AgentRun, AgentRunEvent, AgentDetail, AgentLifecycle, AgentStatus, AgentRunStatus, AgentRunEventType, CreateAgentRequest, UpdateAgentRequest, AgentAsset } from './agentApi';
+
+export * as workflowEngineApi from './workflowEngineApi';

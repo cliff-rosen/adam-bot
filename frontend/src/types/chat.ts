@@ -43,7 +43,7 @@ export interface ToolCall {
     workspace_payload?: WorkspacePayload;  // Payload to display in workspace panel
 }
 
-export type WorkspacePayloadType = 'draft' | 'summary' | 'data' | 'code' | 'plan' | 'wip' | 'final' | 'agent_create' | 'agent_update' | 'table';
+export type WorkspacePayloadType = 'draft' | 'summary' | 'data' | 'code' | 'plan' | 'wip' | 'final' | 'agent_create' | 'agent_update' | 'table' | 'research';
 
 // Table payload types for TABILIZER functionality
 export interface TableColumn {
@@ -92,6 +92,8 @@ export interface WorkspacePayload {
     agent_data?: AgentPayloadData;
     // Extended fields for table payloads (TABILIZER)
     table_data?: TablePayloadData;
+    // Extended fields for research workflow
+    research_data?: ResearchWorkflow;
 }
 
 // ============================================================================
@@ -140,7 +142,113 @@ export interface WipOutput {
     data?: any;  // Structured data when content_type is 'data'
 }
 
-const VALID_PAYLOAD_TYPES = ['draft', 'summary', 'data', 'code', 'plan', 'wip', 'agent_create', 'agent_update', 'table'];
+// ============================================================================
+// Research Workflow Types
+// ============================================================================
+
+export type ResearchWorkflowStage = 'question' | 'checklist' | 'retrieval' | 'compiling' | 'complete';
+
+export interface ResearchWorkflow {
+    id: string;
+    stage: ResearchWorkflowStage;
+    original_query: string;
+    created_at: string;
+
+    // Stage 1: Formulated Question
+    question?: ResearchQuestion;
+
+    // Stage 2: Answer Checklist
+    checklist?: AnswerChecklist;
+
+    // Stage 3: Retrieval Loop State
+    retrieval?: RetrievalState;
+
+    // Stage 4: Final Answer
+    final?: ResearchFinal;
+}
+
+export interface ResearchQuestion {
+    original: string;           // What user asked
+    refined: string;            // AI-refined research question
+    scope: string;              // Clarified scope/boundaries
+    key_terms: string[];        // Important terms/concepts
+    constraints?: string[];     // Any constraints mentioned
+    approved: boolean;          // User approved this formulation
+}
+
+export interface AnswerChecklist {
+    items: ChecklistItem[];
+    approved: boolean;          // User approved this checklist
+}
+
+export interface ChecklistItem {
+    id: string;
+    description: string;        // What this part of the answer needs
+    rationale: string;          // Why this is needed for a complete answer
+    status: 'pending' | 'partial' | 'complete';
+    findings: Finding[];        // Relevant findings for this item
+    priority: 'high' | 'medium' | 'low';
+}
+
+export interface Finding {
+    id: string;
+    checklist_item_id: string;  // Which checklist item this supports
+    source: string;             // Where this came from (e.g., "PubMed: PMID123")
+    source_url?: string;        // Link to source
+    title: string;              // Title/summary of finding
+    content: string;            // The relevant information
+    relevance: string;          // Why it's relevant to the checklist item
+    confidence: 'high' | 'medium' | 'low';
+    added_at: string;
+}
+
+export interface RetrievalState {
+    iteration: number;
+    max_iterations: number;
+    iterations: RetrievalIteration[];
+    current_focus: string[];    // Which checklist item IDs we're working on
+    status: 'searching' | 'reviewing' | 'updating' | 'paused' | 'complete';
+}
+
+export interface RetrievalIteration {
+    iteration_number: number;
+    focus_items: string[];      // Checklist items targeted this iteration
+    queries: SearchQuery[];
+    results_reviewed: number;
+    findings_added: number;
+    notes?: string;             // AI's notes about this iteration
+    completed_at: string;
+}
+
+export interface SearchQuery {
+    id: string;
+    query: string;
+    source: 'pubmed' | 'pubmed_smart' | 'web' | 'semantic_scholar';
+    rationale: string;          // Why this query
+    results_count: number;
+    useful_results: number;
+    executed_at: string;
+}
+
+export interface ResearchFinal {
+    answer: string;             // The compiled answer (markdown)
+    summary: string;            // Brief summary
+    confidence: 'high' | 'medium' | 'low';
+    confidence_explanation: string;
+    limitations: string[];      // Known gaps or limitations
+    sources: ResearchSource[];  // All sources used
+    approved: boolean;
+}
+
+export interface ResearchSource {
+    id: string;
+    title: string;
+    url?: string;
+    citation?: string;
+    contribution: string;       // How this source contributed
+}
+
+const VALID_PAYLOAD_TYPES = ['draft', 'summary', 'data', 'code', 'plan', 'wip', 'agent_create', 'agent_update', 'table', 'research'];
 
 /**
  * Parse a workspace payload from message content.

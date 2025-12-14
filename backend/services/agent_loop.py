@@ -222,6 +222,7 @@ async def run_agent_loop(
                             yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
                             return
 
+                        # Yield the text deltas that the model streams back
                         if hasattr(event, 'type'):
                             if event.type == 'content_block_delta' and hasattr(event, 'delta'):
                                 if hasattr(event.delta, 'text'):
@@ -253,95 +254,93 @@ async def run_agent_loop(
             # Check for tool use
             tool_use_blocks = [b for b in response.content if b.type == "tool_use"]
 
-            # Debug: log response content types
-            content_types = [b.type for b in response.content]
-            logger.info(f"Response content blocks: {content_types}, stop_reason: {response.stop_reason}")
-
             if not tool_use_blocks:
                 # No tool calls - we're done
                 logger.info(f"Agent loop complete after {iteration} iterations (no tool_use blocks found)")
                 yield AgentComplete(text=collected_text, tool_calls=tool_call_history)
                 return
 
-            # Handle tool calls (process first one)
-            tool_block = tool_use_blocks[0]
-            tool_name = tool_block.name
-            tool_input = tool_block.input
-            tool_use_id = tool_block.id
+            # Handle ALL tool calls in this response
+            tool_results = []
 
-            logger.info(f"Agent tool call: {tool_name}")
+            for tool_block in tool_use_blocks:
+                tool_name = tool_block.name
+                tool_input = tool_block.input
+                tool_use_id = tool_block.id
 
-            yield AgentToolStart(
-                tool_name=tool_name,
-                tool_input=tool_input,
-                tool_use_id=tool_use_id
-            )
+                logger.info(f"Agent tool call: {tool_name}")
 
-            # Execute tool
-            tool_config = tools.get(tool_name)
-            tool_result_str = ""
-            tool_result_data = None
-            tool_workspace_payload = None
-
-            if not tool_config:
-                tool_result_str = f"Unknown tool: {tool_name}"
-            elif tool_config.streaming:
-                # Streaming tool - yield progress updates
-                async for progress_or_result in execute_streaming_tool(
-                    tool_config, tool_input, db, user_id, context, cancellation_token
-                ):
-                    # Check cancellation between progress updates
-                    if cancellation_token.is_cancelled:
-                        logger.info(f"Tool {tool_name} cancelled")
-                        yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
-                        return
-
-                    if isinstance(progress_or_result, ToolProgress):
-                        logger.info(f"Yielding tool progress: {tool_name} - {progress_or_result.stage}: {progress_or_result.message}")
-                        yield AgentToolProgress(
-                            tool_name=tool_name,
-                            progress=progress_or_result
-                        )
-                    elif isinstance(progress_or_result, tuple):
-                        tool_result_str, tool_result_data, tool_workspace_payload = progress_or_result
-            else:
-                # Non-streaming tool
-                tool_result_str, tool_result_data, tool_workspace_payload = await execute_tool(
-                    tool_config, tool_input, db, user_id, context
+                yield AgentToolStart(
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                    tool_use_id=tool_use_id
                 )
 
-            # Check cancellation after tool execution
-            if cancellation_token.is_cancelled:
-                yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
-                return
+                # Execute tool
+                tool_config = tools.get(tool_name)
+                tool_result_str = ""
+                tool_result_data = None
+                tool_workspace_payload = None
 
-            # Record tool call
-            tool_call_record = {
-                "tool_name": tool_name,
-                "input": tool_input,
-                "output": tool_result_data if tool_result_data else tool_result_str
-            }
-            if tool_workspace_payload:
-                tool_call_record["workspace_payload"] = tool_workspace_payload
-            tool_call_history.append(tool_call_record)
+                if not tool_config:
+                    tool_result_str = f"Unknown tool: {tool_name}"
+                elif tool_config.streaming:
+                    # Streaming tool - yield progress updates
+                    async for progress_or_result in execute_streaming_tool(
+                        tool_config, tool_input, db, user_id, context, cancellation_token
+                    ):
+                        # Check cancellation between progress updates
+                        if cancellation_token.is_cancelled:
+                            logger.info(f"Tool {tool_name} cancelled")
+                            yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
+                            return
 
-            yield AgentToolComplete(
-                tool_name=tool_name,
-                result_text=tool_result_str,
-                result_data=tool_result_data
-            )
+                        if isinstance(progress_or_result, ToolProgress):
+                            logger.info(f"Yielding tool progress: {tool_name} - {progress_or_result.stage}: {progress_or_result.message}")
+                            yield AgentToolProgress(
+                                tool_name=tool_name,
+                                progress=progress_or_result
+                            )
+                        elif isinstance(progress_or_result, tuple):
+                            tool_result_str, tool_result_data, tool_workspace_payload = progress_or_result
+                else:
+                    # Non-streaming tool
+                    tool_result_str, tool_result_data, tool_workspace_payload = await execute_tool(
+                        tool_config, tool_input, db, user_id, context
+                    )
 
-            # Add tool interaction to messages
-            assistant_content = _format_assistant_content(response.content)
-            messages.append({"role": "assistant", "content": assistant_content})
-            messages.append({
-                "role": "user",
-                "content": [{
+                # Check cancellation after tool execution
+                if cancellation_token.is_cancelled:
+                    yield AgentCancelled(text=collected_text, tool_calls=tool_call_history)
+                    return
+
+                # Record tool call
+                tool_call_record = {
+                    "tool_name": tool_name,
+                    "input": tool_input,
+                    "output": tool_result_data if tool_result_data else tool_result_str
+                }
+                if tool_workspace_payload:
+                    tool_call_record["workspace_payload"] = tool_workspace_payload
+                tool_call_history.append(tool_call_record)
+
+                # Collect tool result for the message
+                tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tool_use_id,
                     "content": tool_result_str
-                }]
-            })
+                })
+
+                yield AgentToolComplete(
+                    tool_name=tool_name,
+                    result_text=tool_result_str,
+                    result_data=tool_result_data
+                )
+
+            # Add tool interaction to messages (all tool_use blocks and all tool_results)
+            assistant_content = _format_assistant_content(response.content)
+            messages.append({"role": "assistant", "content": assistant_content})
+            messages.append({"role": "user", "content": tool_results})
             api_kwargs["messages"] = messages
 
             # Add separator to collected text if streaming

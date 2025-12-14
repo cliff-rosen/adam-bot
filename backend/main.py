@@ -1,12 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, llm, search, web_retrieval, general_chat, conversations, memories, assets, profile, workflow, tools, oauth, agents, table
+from routers import auth, llm, search, web_retrieval, general_chat, conversations, memories, assets, profile, workflow, tools, oauth, agents, table, workflows
 from database import init_db
 from config import settings, setup_logging
 from middleware import LoggingMiddleware
 from pydantic import ValidationError
 from starlette.responses import JSONResponse
 from tools import register_all_builtin_tools
+from workflows.templates import register_all_workflows
 
 # Setup logging first
 logger, request_id_filter = setup_logging()
@@ -60,6 +61,7 @@ app.include_router(tools.router)
 app.include_router(oauth.router)
 app.include_router(agents.router)
 app.include_router(table.router)
+app.include_router(workflows.router)
 
 logger.info("Routers included")
 
@@ -71,6 +73,8 @@ async def startup_event():
     logger.info("Database initialized")
     register_all_builtin_tools()
     logger.info("Tools registered")
+    register_all_workflows()
+    logger.info("Workflows registered")
 
 
 @app.get("/")

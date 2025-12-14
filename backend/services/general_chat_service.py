@@ -121,34 +121,71 @@ class GeneralChatService:
                 stream_text=True,
                 temperature=0.7
             ):
-                # Map AgentEvent to SSE responses
-                sse_response = self._map_event_to_sse(event)
-                if sse_response:
-                    yield sse_response
+                if isinstance(event, AgentThinking):
+                    yield ChatStatusResponse(
+                        status=event.message, payload=None, error=None, debug=None
+                    ).model_dump_json()
 
-                # Track state from events
-                if isinstance(event, AgentTextDelta):
+                elif isinstance(event, AgentTextDelta):
                     collected_text += event.text
+                    yield ChatStreamChunk(
+                        token=event.text, response_text=None, payload=None,
+                        status="streaming", error=None, debug=None
+                    ).model_dump_json()
+
+                elif isinstance(event, AgentToolStart):
+                    start_marker = f" [{event.tool_name}..."
+                    collected_text += start_marker
+                    yield ChatStreamChunk(
+                        token=start_marker, response_text=None, payload=None,
+                        status="streaming", error=None, debug=None
+                    ).model_dump_json()
+                    yield ChatStatusResponse(
+                        status=f"Running {event.tool_name}...",
+                        payload={"tool": event.tool_name, "phase": "started"},
+                        error=None, debug=None
+                    ).model_dump_json()
+
+                elif isinstance(event, AgentToolProgress):
+                    yield ChatStatusResponse(
+                        status=event.progress.message,
+                        payload={
+                            "tool": event.tool_name, "phase": "progress",
+                            "stage": event.progress.stage, "data": event.progress.data,
+                            "progress": event.progress.progress
+                        },
+                        error=None, debug=None
+                    ).model_dump_json()
 
                 elif isinstance(event, AgentToolComplete):
+                    complete_marker = " complete]"
+                    collected_text += complete_marker
+                    yield ChatStreamChunk(
+                        token=complete_marker, response_text=None, payload=None,
+                        status="streaming", error=None, debug=None
+                    ).model_dump_json()
+                    yield ChatStatusResponse(
+                        status=f"Completed {event.tool_name}",
+                        payload={"tool": event.tool_name, "phase": "completed"},
+                        error=None, debug=None
+                    ).model_dump_json()
                     tool_call_history.append({
                         "tool_name": event.tool_name,
-                        "input": {},  # Input is in AgentToolStart
+                        "input": {},
                         "output": event.result_data if event.result_data else event.result_text
                     })
 
                 elif isinstance(event, (AgentComplete, AgentCancelled)):
-                    collected_text = event.text
                     tool_call_history = event.tool_calls
+                    if isinstance(event, AgentCancelled):
+                        yield ChatStatusResponse(
+                            status="Cancelled", payload=None, error=None, debug=None
+                        ).model_dump_json()
 
                 elif isinstance(event, AgentError):
                     yield ChatStreamChunk(
-                        token=None,
-                        response_text=None,
-                        payload=None,
-                        status=None,
-                        error=f"Error: {event.error}",
-                        debug={"error_type": "agent_error"}
+                        token=None, response_text=None, payload=None, status=None,
+                        error=f"Error: {event.error}", debug={"error_type": "agent_error"}
                     ).model_dump_json()
                     return
 
@@ -198,69 +235,6 @@ class GeneralChatService:
                 error=f"Service error: {str(e)}",
                 debug={"error_type": type(e).__name__}
             ).model_dump_json()
-
-    def _map_event_to_sse(self, event: AgentEvent) -> Optional[str]:
-        """Map an AgentEvent to an SSE JSON response."""
-        from routers.general_chat import ChatStreamChunk, ChatStatusResponse
-
-        if isinstance(event, AgentThinking):
-            return ChatStatusResponse(
-                status=event.message,
-                payload=None,
-                error=None,
-                debug=None
-            ).model_dump_json()
-
-        elif isinstance(event, AgentTextDelta):
-            return ChatStreamChunk(
-                token=event.text,
-                response_text=None,
-                payload=None,
-                status="streaming",
-                error=None,
-                debug=None
-            ).model_dump_json()
-
-        elif isinstance(event, AgentToolStart):
-            return ChatStatusResponse(
-                status=f"Running {event.tool_name}...",
-                payload={"tool": event.tool_name, "phase": "started"},
-                error=None,
-                debug=None
-            ).model_dump_json()
-
-        elif isinstance(event, AgentToolProgress):
-            return ChatStatusResponse(
-                status=event.progress.message,
-                payload={
-                    "tool": event.tool_name,
-                    "phase": "progress",
-                    "stage": event.progress.stage,
-                    "data": event.progress.data,
-                    "progress": event.progress.progress
-                },
-                error=None,
-                debug=None
-            ).model_dump_json()
-
-        elif isinstance(event, AgentToolComplete):
-            return ChatStatusResponse(
-                status=f"Completed {event.tool_name}",
-                payload={"tool": event.tool_name, "phase": "completed"},
-                error=None,
-                debug=None
-            ).model_dump_json()
-
-        elif isinstance(event, AgentCancelled):
-            return ChatStatusResponse(
-                status="Cancelled",
-                payload=None,
-                error=None,
-                debug=None
-            ).model_dump_json()
-
-        # AgentComplete and AgentError are handled in the main loop
-        return None
 
     # =========================================================================
     # Conversation Helpers

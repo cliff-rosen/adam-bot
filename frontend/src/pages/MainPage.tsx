@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { ChevronLeftIcon, ChevronRightIcon, PlusIcon } from '@heroicons/react/24/solid';
 import { useGeneralChat } from '../hooks/useGeneralChat';
 import { useProfile } from '../context/ProfileContext';
-import { InteractionType, ToolCall, GeneralChatMessage, WorkspacePayload, WorkflowPlan, WorkflowStep, WorkflowStepDefinition } from '../types/chat';
+import { InteractionType, ToolCall, GeneralChatMessage, WorkspacePayload, WorkflowPlan, WorkflowStep, WorkflowStepDefinition, ResearchWorkflow } from '../types/chat';
 import { memoryApi, Memory, assetApi, Asset, AssetUpdate, workflowApi, StepStatusUpdate, ToolCallRecord, ToolInfo, ToolProgressUpdate, agentApi } from '../lib/api';
 import {
     ConversationSidebar,
@@ -11,8 +11,15 @@ import {
     WorkspacePanel,
     ContextPanel,
     MemoryBrowserModal,
-    AssetBrowserModal
+    AssetBrowserModal,
+    ToolBrowserModal,
+    WorkflowSelectorModal
 } from '../components/panels';
+import {
+    WorkflowInstanceState,
+    WorkflowHandlers,
+    startWorkflowWithUI,
+} from '../lib/workflows';
 
 const SIDEBAR_WIDTH = 256;
 const CONTEXT_PANEL_WIDTH = 280;
@@ -88,6 +95,12 @@ export default function MainPage() {
     // Modal state
     const [isMemoryModalOpen, setIsMemoryModalOpen] = useState(false);
     const [isAssetModalOpen, setIsAssetModalOpen] = useState(false);
+    const [isToolModalOpen, setIsToolModalOpen] = useState(false);
+    const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
+
+    // Workflow engine state
+    const [workflowInstance, setWorkflowInstance] = useState<WorkflowInstanceState | null>(null);
+    const [workflowHandlers, setWorkflowHandlers] = useState<WorkflowHandlers | null>(null);
 
     // Content state
     const [selectedToolHistory, setSelectedToolHistory] = useState<ToolCall[] | null>(null);
@@ -731,6 +744,94 @@ export default function MainPage() {
         setActivePayload(null);
     }, []);
 
+    // Research workflow handlers
+    const handleUpdateResearchWorkflow = useCallback((workflow: ResearchWorkflow) => {
+        // Update the activePayload with the new workflow state
+        setActivePayload(prev => {
+            if (!prev || prev.type !== 'research') return prev;
+            return {
+                ...prev,
+                research_data: workflow
+            };
+        });
+    }, []);
+
+    const handleResearchProceed = useCallback(() => {
+        if (!activePayload || activePayload.type !== 'research' || !activePayload.research_data) return;
+        const workflow = activePayload.research_data;
+
+        // Move to next stage and trigger LLM to continue
+        sendMessage(
+            `Continue with the research workflow. Current stage: ${workflow.stage}. Please proceed to the next step.`,
+            InteractionType.ACTION_EXECUTED,
+            {
+                action_identifier: 'research_proceed',
+                action_data: { workflow_id: workflow.id, current_stage: workflow.stage }
+            }
+        );
+    }, [activePayload, sendMessage]);
+
+    const handleResearchRunRetrieval = useCallback(() => {
+        if (!activePayload || activePayload.type !== 'research' || !activePayload.research_data) return;
+        const workflow = activePayload.research_data;
+
+        // Start or resume retrieval iterations
+        sendMessage(
+            `Run retrieval iterations for the research workflow.`,
+            InteractionType.ACTION_EXECUTED,
+            {
+                action_identifier: 'research_run_retrieval',
+                action_data: { workflow_id: workflow.id }
+            }
+        );
+    }, [activePayload, sendMessage]);
+
+    const handleResearchPauseRetrieval = useCallback(() => {
+        if (!activePayload || activePayload.type !== 'research' || !activePayload.research_data) return;
+        const workflow = activePayload.research_data;
+
+        // Update retrieval state to paused
+        handleUpdateResearchWorkflow({
+            ...workflow,
+            retrieval: workflow.retrieval ? {
+                ...workflow.retrieval,
+                status: 'paused'
+            } : undefined
+        });
+    }, [activePayload, handleUpdateResearchWorkflow]);
+
+    const handleResearchCompile = useCallback(() => {
+        if (!activePayload || activePayload.type !== 'research' || !activePayload.research_data) return;
+        const workflow = activePayload.research_data;
+
+        // Trigger compilation of final answer
+        sendMessage(
+            `Compile the final answer for the research workflow based on the gathered findings.`,
+            InteractionType.ACTION_EXECUTED,
+            {
+                action_identifier: 'research_compile',
+                action_data: { workflow_id: workflow.id }
+            }
+        );
+    }, [activePayload, sendMessage]);
+
+    const handleResearchComplete = useCallback(() => {
+        if (!activePayload || activePayload.type !== 'research' || !activePayload.research_data) return;
+        const workflow = activePayload.research_data;
+
+        // Save final answer as an asset if present
+        if (workflow.final?.answer) {
+            handleSavePayloadAsAsset({
+                type: 'draft',
+                title: `Research: ${workflow.question?.refined || workflow.original_query}`,
+                content: workflow.final.answer
+            }, false);
+        }
+
+        // Clear the research workflow
+        setActivePayload(null);
+    }, [activePayload, handleSavePayloadAsAsset]);
+
     const handleViewStepOutput = useCallback((stepNumber: number) => {
         if (!activeWorkflow) return;
         const step = activeWorkflow.steps.find(s => s.step_number === stepNumber);
@@ -742,6 +843,31 @@ export default function MainPage() {
             });
         }
     }, [activeWorkflow]);
+
+    // Workflow engine handlers
+    const handleStartWorkflow = useCallback(async (workflowId: string, initialInput: Record<string, any>) => {
+        try {
+            const { handlers } = await startWorkflowWithUI(workflowId, initialInput, {
+                setWorkflowState: setWorkflowInstance,
+                showNotification: (message, type) => {
+                    console.log(`[${type}] ${message}`);
+                    // TODO: Add toast notification
+                },
+                conversationId: conversationId || undefined,
+            });
+            setWorkflowHandlers(handlers);
+            // Clear other workspace content
+            setActivePayload(null);
+            setSelectedToolHistory(null);
+        } catch (err) {
+            console.error('Failed to start workflow:', err);
+        }
+    }, [conversationId]);
+
+    const handleCloseWorkflowInstance = useCallback(() => {
+        setWorkflowInstance(null);
+        setWorkflowHandlers(null);
+    }, []);
 
     return (
         <div ref={containerRef} className={`flex h-full ${isDragging ? 'select-none' : ''}`}>
@@ -846,6 +972,15 @@ export default function MainPage() {
                     onAbandonWorkflow={handleAbandonWorkflow}
                     onAcceptAgent={handleAcceptAgent}
                     onRejectAgent={handleRejectAgent}
+                    onUpdateResearchWorkflow={handleUpdateResearchWorkflow}
+                    onResearchProceed={handleResearchProceed}
+                    onResearchRunRetrieval={handleResearchRunRetrieval}
+                    onResearchPauseRetrieval={handleResearchPauseRetrieval}
+                    onResearchCompile={handleResearchCompile}
+                    onResearchComplete={handleResearchComplete}
+                    workflowInstance={workflowInstance}
+                    workflowHandlers={workflowHandlers}
+                    onCloseWorkflowInstance={handleCloseWorkflowInstance}
                 />
             </div>
 
@@ -884,9 +1019,11 @@ export default function MainPage() {
                     onToggleProfile={handleToggleProfile}
                     onExpandMemories={() => setIsMemoryModalOpen(true)}
                     onExpandAssets={() => setIsAssetModalOpen(true)}
+                    onExpandTools={() => setIsToolModalOpen(true)}
                     onEditProfile={handleEditProfile}
                     onAbandonWorkflow={handleAbandonWorkflow}
                     onViewStepOutput={handleViewStepOutput}
+                    onOpenWorkflows={() => setIsWorkflowModalOpen(true)}
                 />
             </div>
 
@@ -907,6 +1044,19 @@ export default function MainPage() {
                 onToggleContext={handleToggleAssetContext}
                 onDelete={handleDeleteAsset}
                 onUpdateAsset={handleUpdateAsset}
+            />
+
+            {/* Tool Browser Modal */}
+            <ToolBrowserModal
+                isOpen={isToolModalOpen}
+                onClose={() => setIsToolModalOpen(false)}
+            />
+
+            {/* Workflow Selector Modal */}
+            <WorkflowSelectorModal
+                isOpen={isWorkflowModalOpen}
+                onClose={() => setIsWorkflowModalOpen(false)}
+                onStartWorkflow={handleStartWorkflow}
             />
         </div>
     );
