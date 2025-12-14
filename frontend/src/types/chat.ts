@@ -15,6 +15,7 @@ export interface GeneralChatMessage {
     suggested_values?: SuggestedValue[];
     suggested_actions?: SuggestedAction[];
     custom_payload?: CustomPayload;
+    workspace_payload?: WorkspacePayload;  // Direct workspace payload from tools (takes precedence over parsed message payloads)
 }
 
 export interface SuggestedValue {

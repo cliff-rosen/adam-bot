@@ -160,13 +160,23 @@ class GeneralChatService:
                 tool_calls=tool_call_history if tool_call_history else None
             )
 
+            # Extract workspace_payload from the last tool that returned one
+            # This takes precedence over any payload block in the LLM's message text
+            workspace_payload = None
+            if tool_call_history:
+                for tool_call in reversed(tool_call_history):
+                    if tool_call.get("workspace_payload"):
+                        workspace_payload = tool_call["workspace_payload"]
+                        break
+
             # Build and yield final payload
             final_payload = ChatResponsePayload(
                 message=collected_text,
                 conversation_id=conversation_id,
                 suggested_values=None,
                 suggested_actions=None,
-                custom_payload={"type": "tool_history", "data": tool_call_history} if tool_call_history else None
+                custom_payload={"type": "tool_history", "data": tool_call_history} if tool_call_history else None,
+                workspace_payload=workspace_payload
             )
 
             yield ChatStreamChunk(

@@ -55,6 +55,22 @@ export default function TablePayloadView({ payload, onSaveAsAsset }: TablePayloa
     const [computeProgress, setComputeProgress] = useState<ComputeProgress | null>(null);
     const [computingColumnKey, setComputingColumnKey] = useState<string | null>(null);
 
+    // Handle saving with current state (including any computed columns)
+    const handleSaveAsAsset = useCallback(() => {
+        if (!onSaveAsAsset) return;
+
+        // Build updated payload with current columns and rows
+        const updatedPayload: WorkspacePayload = {
+            ...payload,
+            table_data: {
+                ...payload.table_data!,
+                columns,
+                rows
+            }
+        };
+        onSaveAsAsset(updatedPayload);
+    }, [payload, columns, rows, onSaveAsAsset]);
+
     // Handle adding a computed column
     const handleAddColumn = useCallback(async (config: ColumnConfig) => {
         setShowAddColumn(false);
@@ -304,7 +320,7 @@ export default function TablePayloadView({ payload, onSaveAsAsset }: TablePayloa
                     </button>
                     {onSaveAsAsset && (
                         <button
-                            onClick={() => onSaveAsAsset(payload)}
+                            onClick={handleSaveAsAsset}
                             className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
                         >
                             Save as Asset

@@ -165,7 +165,8 @@ export function useGeneralChat(options: UseGeneralChatOptions = {}) {
                         timestamp: new Date().toISOString(),
                         suggested_values: responsePayload.suggested_values,
                         suggested_actions: responsePayload.suggested_actions,
-                        custom_payload: responsePayload.custom_payload
+                        custom_payload: responsePayload.custom_payload,
+                        workspace_payload: responsePayload.workspace_payload
                     };
                     setMessages(prev => {
                         console.log('[setMessages] Adding assistant message, prev:', prev.length, prev.map(m => m.role));

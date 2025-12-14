@@ -382,12 +382,30 @@ export default function MainPage() {
 
     const handleSavePayloadAsAsset = async (payload: WorkspacePayload, andClose?: boolean) => {
         try {
-            const assetType = payload.type === 'code' ? 'code' : 'document';
+            let assetType: 'document' | 'code' | 'data' | 'file' | 'link' | 'list';
+            let content: string;
+            let description: string;
+
+            if (payload.type === 'table' && payload.table_data) {
+                // For table payloads, save the table data as JSON
+                assetType = 'data';
+                content = JSON.stringify(payload.table_data, null, 2);
+                description = `Table data from ${payload.table_data.source || 'search'}: ${payload.content || ''}`;
+            } else if (payload.type === 'code') {
+                assetType = 'code';
+                content = payload.content;
+                description = `${payload.type} created from chat`;
+            } else {
+                assetType = 'document';
+                content = payload.content;
+                description = `${payload.type} created from chat`;
+            }
+
             const newAsset = await assetApi.create({
                 name: payload.title,
                 asset_type: assetType,
-                content: payload.content,
-                description: `${payload.type} created from chat`,
+                content,
+                description,
                 source_conversation_id: conversationId || undefined
             });
             setAssets(prev => [newAsset, ...prev]);

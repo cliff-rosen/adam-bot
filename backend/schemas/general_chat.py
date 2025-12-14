@@ -60,3 +60,4 @@ class ChatResponsePayload(BaseModel):
     suggested_values: Optional[List[SuggestedValue]] = None
     suggested_actions: Optional[List[SuggestedAction]] = None
     custom_payload: Optional[CustomPayload] = None
+    workspace_payload: Optional[Any] = None  # Direct workspace payload from tools (takes precedence over parsed message payloads)

@@ -68,10 +68,16 @@ export default function ChatPanel({
         const lastMessage = messages[messages.length - 1];
         if (lastMessage.role !== 'assistant') return;
 
-        // First check message content for payload (e.g., drafts, summaries)
-        let payload: WorkspacePayload | null = parseWorkspacePayload(lastMessage.content).payload;
+        // Priority 1: Check for direct workspace_payload from API response (from tools)
+        // This takes precedence over any payload block in the message text
+        let payload: WorkspacePayload | null = lastMessage.workspace_payload || null;
 
-        // If no payload in content, check tool calls for workspace_payload
+        // Priority 2: Parse message content for payload (e.g., drafts, summaries from LLM)
+        if (!payload) {
+            payload = parseWorkspacePayload(lastMessage.content).payload;
+        }
+
+        // Priority 3: Check tool calls in custom_payload for workspace_payload (legacy)
         if (!payload && lastMessage.custom_payload?.type === 'tool_history') {
             const toolCalls = lastMessage.custom_payload.data as ToolCall[];
             for (const toolCall of toolCalls) {
@@ -175,9 +181,16 @@ export default function ChatPanel({
                     if (message.role === 'assistant') {
                         const parsed = parseWorkspacePayload(message.content);
                         displayText = parsed.text;
-                        payload = parsed.payload;
 
-                        // If no payload in content, check tool calls for workspace_payload
+                        // Priority 1: Check for direct workspace_payload from API response (from tools)
+                        payload = message.workspace_payload || null;
+
+                        // Priority 2: Use parsed payload from message content
+                        if (!payload) {
+                            payload = parsed.payload;
+                        }
+
+                        // Priority 3: Check tool calls in custom_payload for workspace_payload (legacy)
                         if (!payload && message.custom_payload?.type === 'tool_history') {
                             const toolCalls = message.custom_payload.data as ToolCall[];
                             for (const toolCall of toolCalls) {

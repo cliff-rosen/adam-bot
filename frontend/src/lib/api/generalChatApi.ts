@@ -1,5 +1,5 @@
 import { makeStreamRequest } from './streamUtils';
-import { InteractionType, ActionMetadata, SuggestedValue, SuggestedAction, CustomPayload } from '../../types/chat';
+import { InteractionType, ActionMetadata, SuggestedValue, SuggestedAction, CustomPayload, WorkspacePayload } from '../../types/chat';
 
 // ============================================================================
 // General Chat API Request/Response Types
@@ -21,6 +21,7 @@ export interface ChatResponsePayload {
     suggested_values?: SuggestedValue[];
     suggested_actions?: SuggestedAction[];
     custom_payload?: CustomPayload;
+    workspace_payload?: WorkspacePayload;  // Direct workspace payload from tools (takes precedence over parsed message payloads)
 }
 
 export interface ToolProgressPayload {
