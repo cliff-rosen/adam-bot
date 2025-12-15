@@ -295,30 +295,30 @@ export default function WorkflowExecutionView({
         });
     };
 
-    // Get step info - we only have step IDs from the state, not full step definitions
+    // Get node info - we only have node IDs from the state, not full node definitions
     // In a real implementation, we'd fetch the workflow template
-    const steps = useMemo(() => {
-        // Build step list from step_states and step_data
-        const stepIds = new Set([
-            ...Object.keys(instanceState.step_states),
+    const nodes = useMemo(() => {
+        // Build node list from node_states and step_data
+        const nodeIds = new Set([
+            ...Object.keys(instanceState.node_states || {}),
             ...Object.keys(instanceState.step_data),
         ]);
 
-        return Array.from(stepIds).map((id) => ({
+        return Array.from(nodeIds).map((id) => ({
             id,
             name: id.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
             description: '',
         }));
-    }, [instanceState.step_states, instanceState.step_data]);
+    }, [instanceState.node_states, instanceState.step_data]);
 
     // Determine if we're at a checkpoint
     const isAtCheckpoint = instanceState.status === 'waiting';
-    const currentStepId = instanceState.current_step?.id;
+    const currentNodeId = instanceState.current_node?.id;
 
-    // Mock checkpoint config - in real implementation, this comes from the step definition
+    // Mock checkpoint config - in real implementation, this comes from the node definition
     const checkpointConfig = isAtCheckpoint
         ? {
-              title: instanceState.current_step?.name || 'Review',
+              title: instanceState.current_node?.name || 'Review',
               description: 'Please review and take action',
               allowed_actions: ['approve', 'edit', 'reject'] as string[],
               editable_fields: ['refined_question', 'scope'] as string[],
@@ -327,7 +327,7 @@ export default function WorkflowExecutionView({
 
     // Get the data for the previous step (to show at checkpoint)
     const checkpointStepData = useMemo(() => {
-        if (!isAtCheckpoint || !currentStepId) return null;
+        if (!isAtCheckpoint || !currentNodeId) return null;
 
         // Find the most recent step that has data
         const stepDataKeys = Object.keys(instanceState.step_data);
@@ -336,7 +336,7 @@ export default function WorkflowExecutionView({
         // Return the last step's data
         const lastKey = stepDataKeys[stepDataKeys.length - 1];
         return instanceState.step_data[lastKey];
-    }, [isAtCheckpoint, currentStepId, instanceState.step_data]);
+    }, [isAtCheckpoint, currentNodeId, instanceState.step_data]);
 
     return (
         <div className="h-full flex flex-col p-4">
@@ -382,17 +382,17 @@ export default function WorkflowExecutionView({
                 </div>
             )}
 
-            {/* Steps list */}
+            {/* Nodes list */}
             <div className="flex-1 overflow-y-auto space-y-3">
-                {steps.map((step) => (
+                {nodes.map((node) => (
                     <StepItem
-                        key={step.id}
-                        step={step}
-                        stepState={instanceState.step_states[step.id]}
-                        isCurrent={step.id === currentStepId}
-                        isExpanded={expandedSteps.has(step.id)}
-                        onToggle={() => toggleStep(step.id)}
-                        stepData={instanceState.step_data[step.id]}
+                        key={node.id}
+                        step={node}
+                        stepState={instanceState.node_states?.[node.id]}
+                        isCurrent={node.id === currentNodeId}
+                        isExpanded={expandedSteps.has(node.id)}
+                        onToggle={() => toggleStep(node.id)}
+                        stepData={instanceState.step_data[node.id]}
                     />
                 ))}
             </div>

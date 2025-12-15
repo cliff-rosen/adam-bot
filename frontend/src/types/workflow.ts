@@ -1,7 +1,7 @@
 /**
- * Workflow Engine Types
+ * Workflow Engine Types (Graph-Based)
  *
- * Frontend types for the workflow engine.
+ * Frontend types for the graph-based workflow engine.
  */
 
 // Workflow template summary for listing
@@ -21,17 +21,25 @@ export interface CheckpointConfig {
     editable_fields: string[];
 }
 
-// Step definition for display
-export interface StepInfo {
+// Node definition for display
+export interface NodeInfo {
     id: string;
     name: string;
     description: string;
-    step_type: 'execute' | 'checkpoint' | 'conditional' | 'loop';
+    node_type: 'execute' | 'checkpoint';
     ui_component?: string;
     checkpoint_config?: CheckpointConfig;
 }
 
-// Full workflow template
+// Edge definition
+export interface EdgeInfo {
+    from_node: string;
+    to_node: string;
+    label?: string;
+    has_condition: boolean;
+}
+
+// Full workflow template (graph-based)
 export interface WorkflowTemplate {
     id: string;
     name: string;
@@ -40,7 +48,9 @@ export interface WorkflowTemplate {
     category: string;
     input_schema: Record<string, any>;
     output_schema: Record<string, any>;
-    steps: StepInfo[];
+    entry_node: string;
+    nodes: Record<string, NodeInfo>;
+    edges: EdgeInfo[];
 }
 
 // Workflow instance status
@@ -53,19 +63,19 @@ export type WorkflowInstanceStatus =
     | 'failed'
     | 'cancelled';
 
-// Step state
-export interface StepState {
+// Node state
+export interface NodeState {
     status: 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
     execution_count: number;
     error?: string;
 }
 
-// Current step info
-export interface CurrentStep {
+// Current node info
+export interface CurrentNode {
     id: string;
     name: string;
     description: string;
-    step_type: string;
+    node_type: string;
     ui_component?: string;
 }
 
@@ -74,9 +84,9 @@ export interface WorkflowInstanceState {
     id: string;
     workflow_id: string;
     status: WorkflowInstanceStatus;
-    current_step?: CurrentStep;
-    step_data: Record<string, any>;
-    step_states: Record<string, StepState>;
+    current_node?: CurrentNode;
+    step_data: Record<string, any>;  // Keep as step_data for backwards compat with step functions
+    node_states: Record<string, NodeState>;
     created_at: string;
     updated_at: string;
     completed_at?: string;
@@ -86,8 +96,8 @@ export interface WorkflowInstanceState {
 export interface WorkflowEvent {
     event_type: 'step_start' | 'step_complete' | 'checkpoint' | 'error' | 'complete' | 'cancelled';
     instance_id: string;
-    step_id?: string;
-    step_name?: string;
+    node_id?: string;
+    node_name?: string;
     data?: Record<string, any>;
     error?: string;
 }
@@ -100,3 +110,12 @@ export interface ResumeRequest {
     action: CheckpointAction;
     user_data?: Record<string, any>;
 }
+
+// =============================================================================
+// Backwards Compatibility Aliases
+// =============================================================================
+
+// These allow gradual migration of components
+export type StepInfo = NodeInfo;
+export type StepState = NodeState;
+export type CurrentStep = CurrentNode;

@@ -12,10 +12,16 @@ export type {
     WorkflowEvent,
     CheckpointAction,
     CheckpointConfig,
+    ResumeRequest,
+    // Graph-based types
+    NodeInfo,
+    EdgeInfo,
+    NodeState,
+    CurrentNode,
+    // Backwards compatibility aliases
     StepInfo,
     StepState,
     CurrentStep,
-    ResumeRequest,
 } from '../../types/workflow';
 
 // API functions (re-exported from lib/api)
