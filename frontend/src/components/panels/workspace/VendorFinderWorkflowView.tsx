@@ -5,7 +5,7 @@
  * Shows vendor cards with reviews, ratings, and selection controls.
  */
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
     CheckCircleIcon,
     XCircleIcon,
@@ -384,6 +384,8 @@ export default function VendorFinderWorkflowView({
     currentEvent,
 }: WorkflowViewProps) {
     const [expandedVendors, setExpandedVendors] = useState<Set<string>>(new Set());
+    const [isTransitioning, setIsTransitioning] = useState(false);
+    const [lastCheckpointId, setLastCheckpointId] = useState<string | null>(null);
 
     const toggleVendor = (id: string) => {
         setExpandedVendors(prev => {
@@ -399,6 +401,27 @@ export default function VendorFinderWorkflowView({
     const isAtCheckpoint = instance.status === 'waiting';
     const isRunning = instance.status === 'running';
     const stepData = instance.step_data;
+
+    // Track checkpoint transitions - reset transitioning when we move to a new checkpoint or start running
+    useEffect(() => {
+        if (isAtCheckpoint && currentNodeId !== lastCheckpointId) {
+            setLastCheckpointId(currentNodeId || null);
+            setIsTransitioning(false);
+        }
+        if (isRunning && isTransitioning) {
+            setIsTransitioning(false);
+        }
+    }, [isAtCheckpoint, currentNodeId, lastCheckpointId, isRunning, isTransitioning]);
+
+    // Handler for approve with transition state
+    const handleApprove = () => {
+        setIsTransitioning(true);
+        handlers.onApprove();
+    };
+
+    const handleReject = () => {
+        handlers.onReject();
+    };
 
     // Get vendors from the latest step that has them
     const vendors = useMemo(() => {
@@ -458,21 +481,23 @@ export default function VendorFinderWorkflowView({
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-6">
-                {/* Processing Indicator - show when running and not at checkpoint */}
-                {(isRunning || isProcessing) && !isAtCheckpoint && (
+                {/* Processing Indicator - show when running, processing, or transitioning */}
+                {(isRunning || isProcessing || isTransitioning) && !isAtCheckpoint && (
                     <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
                         <div className="flex items-center gap-3">
                             <ArrowPathIcon className="w-5 h-5 text-blue-600 dark:text-blue-400 animate-spin flex-shrink-0" />
                             <div className="flex-1 min-w-0">
                                 <div className="font-medium text-gray-900 dark:text-white">
-                                    {currentEvent?.node_name || instance.current_node?.name || 'Processing...'}
+                                    {isTransitioning && !isRunning
+                                        ? 'Resuming workflow...'
+                                        : currentEvent?.node_name || instance.current_node?.name || 'Processing...'}
                                 </div>
                                 {currentEvent?.data?.message && (
                                     <div className="text-sm text-gray-600 dark:text-gray-400 truncate">
                                         {currentEvent.data.message}
                                     </div>
                                 )}
-                                {!currentEvent?.data?.message && currentNodeId && (
+                                {!currentEvent?.data?.message && !isTransitioning && currentNodeId && (
                                     <div className="text-sm text-gray-600 dark:text-gray-400">
                                         {currentNodeId === 'define_criteria' && 'Analyzing your requirements...'}
                                         {currentNodeId === 'broad_search' && 'Searching for vendors...'}
@@ -507,15 +532,21 @@ export default function VendorFinderWorkflowView({
                         </p>
                         <div className="flex gap-2">
                             <button
-                                onClick={() => handlers.onApprove()}
-                                className="flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors"
+                                onClick={handleApprove}
+                                disabled={isTransitioning}
+                                className="flex items-center gap-2 px-4 py-2 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg hover:bg-gray-800 dark:hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                <CheckCircleIcon className="w-4 h-4" />
-                                Continue
+                                {isTransitioning ? (
+                                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <CheckCircleIcon className="w-4 h-4" />
+                                )}
+                                {isTransitioning ? 'Continuing...' : 'Continue'}
                             </button>
                             <button
-                                onClick={() => handlers.onReject()}
-                                className="flex items-center gap-2 px-4 py-2 text-gray-500 hover:text-gray-700 transition-colors"
+                                onClick={handleReject}
+                                disabled={isTransitioning}
+                                className="flex items-center gap-2 px-4 py-2 text-gray-500 hover:text-gray-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                                 <XCircleIcon className="w-4 h-4" />
                                 Cancel
