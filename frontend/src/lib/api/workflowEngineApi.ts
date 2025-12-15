@@ -4,7 +4,8 @@
  * API calls for workflow operations.
  */
 
-import settings from '../../config/settings';
+import { api } from './index';
+import { makeStreamRequest } from './streamUtils';
 import {
     WorkflowSummary,
     WorkflowTemplate,
@@ -13,12 +14,62 @@ import {
     CheckpointAction,
 } from '../../types/workflow';
 
-const WORKFLOWS_API = `${settings.apiUrl}/api/workflows`;
+/**
+ * Helper to parse SSE events from a raw stream.
+ * Uses makeStreamRequest and parses the SSE data lines.
+ */
+async function* parseSSEStream<T>(
+    endpoint: string,
+    params: Record<string, any>,
+    signal?: AbortSignal
+): AsyncGenerator<T> {
+    const rawStream = makeStreamRequest(endpoint, params, 'POST', signal);
 
-// Helper to get auth headers
-function getAuthHeaders(): Record<string, string> {
-    const token = localStorage.getItem('authToken');
-    return token ? { 'Authorization': `Bearer ${token}` } : {};
+    // Buffer for accumulating partial SSE data lines across chunks
+    let buffer = '';
+
+    for await (const update of rawStream) {
+        buffer += update.data;
+
+        // Process complete lines from the buffer
+        let newlineIndex: number;
+        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
+            const line = buffer.slice(0, newlineIndex);
+            buffer = buffer.slice(newlineIndex + 1);
+
+            // Skip empty lines and non-data lines
+            if (!line.trim() || !line.startsWith('data: ')) {
+                continue;
+            }
+
+            const jsonStr = line.slice(6); // Remove "data: " prefix
+
+            // Skip ping/keepalive messages
+            if (jsonStr === '' || jsonStr === 'ping') {
+                continue;
+            }
+
+            try {
+                const data = JSON.parse(jsonStr) as T;
+                yield data;
+            } catch (e) {
+                // JSON parse failed - put it back and wait for more data
+                buffer = line + '\n' + buffer;
+                break;
+            }
+        }
+    }
+
+    // Process any remaining buffered data
+    if (buffer.trim() && buffer.startsWith('data: ')) {
+        const jsonStr = buffer.slice(6);
+        try {
+            const data = JSON.parse(jsonStr) as T;
+            yield data;
+        } catch (e) {
+            console.error('Failed to parse final workflow event:', jsonStr.slice(0, 200));
+        }
+    }
 }
 
 /**
@@ -28,30 +79,16 @@ export async function listWorkflows(): Promise<{
     workflows: WorkflowSummary[];
     categories: string[];
 }> {
-    const response = await fetch(`${WORKFLOWS_API}/list`, {
-        headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to list workflows: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await api.get('/api/workflows/list');
+    return response.data;
 }
 
 /**
  * Get details of a specific workflow template.
  */
 export async function getWorkflowTemplate(workflowId: string): Promise<WorkflowTemplate> {
-    const response = await fetch(`${WORKFLOWS_API}/templates/${workflowId}`, {
-        headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to get workflow template: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await api.get(`/api/workflows/templates/${workflowId}`);
+    return response.data;
 }
 
 /**
@@ -62,92 +99,23 @@ export async function startWorkflow(
     initialInput: Record<string, any>,
     conversationId?: number
 ): Promise<{ instance_id: string; workflow_id: string; status: string }> {
-    const response = await fetch(`${WORKFLOWS_API}/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
-        body: JSON.stringify({
-            workflow_id: workflowId,
-            initial_input: initialInput,
-            conversation_id: conversationId,
-        }),
+    const response = await api.post('/api/workflows/start', {
+        workflow_id: workflowId,
+        initial_input: initialInput,
+        conversation_id: conversationId,
     });
-
-    if (!response.ok) {
-        throw new Error(`Failed to start workflow: ${response.statusText}`);
-    }
-
-    return response.json();
+    return response.data;
 }
 
 /**
  * Run a workflow instance and stream events.
- * Returns an async generator and an abort function.
  */
 export function runWorkflow(instanceId: string, signal?: AbortSignal): AsyncGenerator<WorkflowEvent> {
-    return createEventStream(`${WORKFLOWS_API}/instances/${instanceId}/run`, 'POST', undefined, signal);
-}
-
-/**
- * Helper to create an SSE event stream with abort support.
- */
-async function* createEventStream(
-    url: string,
-    method: string,
-    body?: Record<string, any>,
-    signal?: AbortSignal
-): AsyncGenerator<WorkflowEvent> {
-    const headers: Record<string, string> = {
-        'Accept': 'text/event-stream',
-        ...getAuthHeaders(),
-    };
-
-    if (body) {
-        headers['Content-Type'] = 'application/json';
-    }
-
-    const response = await fetch(url, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-        signal,
-    });
-
-    if (!response.ok) {
-        throw new Error(`Request failed: ${response.statusText}`);
-    }
-
-    const reader = response.body?.getReader();
-    if (!reader) {
-        throw new Error('No response body');
-    }
-
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    try {
-                        const event = JSON.parse(line.slice(6)) as WorkflowEvent;
-                        yield event;
-                    } catch (e) {
-                        console.error('Failed to parse workflow event:', e);
-                    }
-                }
-            }
-        }
-    } finally {
-        // Ensure reader is released
-        reader.releaseLock();
-    }
+    return parseSSEStream<WorkflowEvent>(
+        `/api/workflows/instances/${instanceId}/run`,
+        {}, // No body params needed
+        signal
+    );
 }
 
 /**
@@ -159,9 +127,8 @@ export function resumeWorkflow(
     userData?: Record<string, any>,
     signal?: AbortSignal
 ): AsyncGenerator<WorkflowEvent> {
-    return createEventStream(
-        `${WORKFLOWS_API}/instances/${instanceId}/resume`,
-        'POST',
+    return parseSSEStream<WorkflowEvent>(
+        `/api/workflows/instances/${instanceId}/resume`,
         { action, user_data: userData },
         signal
     );
@@ -171,41 +138,20 @@ export function resumeWorkflow(
  * Get the current state of a workflow instance.
  */
 export async function getWorkflowState(instanceId: string): Promise<WorkflowInstanceState> {
-    const response = await fetch(`${WORKFLOWS_API}/instances/${instanceId}`, {
-        headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to get workflow state: ${response.statusText}`);
-    }
-
-    return response.json();
+    const response = await api.get(`/api/workflows/instances/${instanceId}`);
+    return response.data;
 }
 
 /**
  * Cancel a running workflow.
  */
 export async function cancelWorkflow(instanceId: string): Promise<void> {
-    const response = await fetch(`${WORKFLOWS_API}/instances/${instanceId}/cancel`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to cancel workflow: ${response.statusText}`);
-    }
+    await api.post(`/api/workflows/instances/${instanceId}/cancel`);
 }
 
 /**
  * Pause a running workflow.
  */
 export async function pauseWorkflow(instanceId: string): Promise<void> {
-    const response = await fetch(`${WORKFLOWS_API}/instances/${instanceId}/pause`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-    });
-
-    if (!response.ok) {
-        throw new Error(`Failed to pause workflow: ${response.statusText}`);
-    }
+    await api.post(`/api/workflows/instances/${instanceId}/pause`);
 }
