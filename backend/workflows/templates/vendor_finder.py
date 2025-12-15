@@ -148,32 +148,32 @@ async def define_criteria(context: WorkflowContext) -> StepOutput:
                 "role": "user",
                 "content": f"""I need to find vendors/service providers. Help me define clear search criteria.
 
-User's request: "{user_query}"
-Location (if specified): "{location}"
-Additional requirements: "{requirements}"
+                User's request: "{user_query}"
+                Location (if specified): "{location}"
+                Additional requirements: "{requirements}"
 
-Please structure this into:
-1. Type of vendor/service (be specific)
-2. Geographic scope (if applicable)
-3. Key requirements/features needed
-4. Nice-to-have features
-5. Budget considerations (if mentioned)
-6. Any deal-breakers or things to avoid
+                Please structure this into:
+                1. Type of vendor/service (be specific)
+                2. Geographic scope (if applicable)
+                3. Key requirements/features needed
+                4. Nice-to-have features
+                5. Budget considerations (if mentioned)
+                6. Any deal-breakers or things to avoid
 
-Return JSON:
-{{
-    "vendor_type": "specific type of vendor",
-    "vendor_type_alternatives": ["alternative names/types to search"],
-    "location": "city/region or 'remote'/'any'",
-    "radius": "local/regional/national/international",
-    "must_have": ["requirement 1", "requirement 2"],
-    "nice_to_have": ["feature 1", "feature 2"],
-    "budget_hint": "any budget info or 'not specified'",
-    "avoid": ["things to avoid"],
-    "search_queries": ["query 1 to search", "query 2 to search", "query 3 to search"]
-}}
+                Return JSON:
+                {{
+                    "vendor_type": "specific type of vendor",
+                    "vendor_type_alternatives": ["alternative names/types to search"],
+                    "location": "city/region or 'remote'/'any'",
+                    "radius": "local/regional/national/international",
+                    "must_have": ["requirement 1", "requirement 2"],
+                    "nice_to_have": ["feature 1", "feature 2"],
+                    "budget_hint": "any budget info or 'not specified'",
+                    "avoid": ["things to avoid"],
+                    "search_queries": ["query 1 to search", "query 2 to search", "query 3 to search"]
+                }}
 
-JSON:"""
+                JSON:"""
             }]
         )
 
@@ -193,20 +193,20 @@ JSON:"""
 
         display = f"""## Search Criteria
 
-**Vendor Type:** {data.get('vendor_type', user_query)}
-**Location:** {data.get('location', 'Any')} ({data.get('radius', 'any')})
+        **Vendor Type:** {data.get('vendor_type', user_query)}
+        **Location:** {data.get('location', 'Any')} ({data.get('radius', 'any')})
 
-**Must Have:**
-{chr(10).join(f'- {r}' for r in data.get('must_have', [])) or '- None specified'}
+        **Must Have:**
+        {chr(10).join(f'- {r}' for r in data.get('must_have', [])) or '- None specified'}
 
-**Nice to Have:**
-{chr(10).join(f'- {r}' for r in data.get('nice_to_have', [])) or '- None specified'}
+        **Nice to Have:**
+        {chr(10).join(f'- {r}' for r in data.get('nice_to_have', [])) or '- None specified'}
 
-**Budget:** {data.get('budget_hint', 'Not specified')}
+        **Budget:** {data.get('budget_hint', 'Not specified')}
 
-**Search Queries to Use:**
-{chr(10).join(f'- {q}' for q in data.get('search_queries', []))}
-"""
+        **Search Queries to Use:**
+        {chr(10).join(f'- {q}' for q in data.get('search_queries', []))}
+        """
 
         return StepOutput(
             success=True,

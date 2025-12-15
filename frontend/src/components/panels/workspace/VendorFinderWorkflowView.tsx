@@ -371,7 +371,7 @@ function CriteriaView({ criteria }: { criteria: Criteria }) {
             )}
 
             {criteria.budget_hint && criteria.budget_hint !== 'not specified' && (
-                <p className="text-sm"><strong>Budget:</strong> {criteria.budget_hint}</p>
+                <p className="text-sm text-gray-700 dark:text-gray-300"><strong>Budget:</strong> {criteria.budget_hint}</p>
             )}
         </div>
     );
