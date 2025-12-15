@@ -1,10 +1,12 @@
 """
-Review Collector Tool (Agentic)
+Review Collector Tool
 
-Collects reviews from a SINGLE source (Yelp, Google, or Reddit) with strict
-entity verification before collection.
+Collects reviews from a SINGLE source (Yelp, Google, or Reddit).
 
-Returns a journey-based payload that tells the story of the collection effort.
+Architecture:
+1. Entity verification is a SEPARATE orchestrated workflow (not autonomous agent)
+2. Once entity is verified, artifact collection extracts reviews from the verified page
+3. Returns journey-based payload with full telemetry
 """
 
 import json
@@ -20,6 +22,7 @@ from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from tools.registry import ToolConfig, ToolResult, ToolProgress, register_tool
+from tools.builtin.entity_verification import verify_entity, VerificationResult
 from services.agent_loop import (
     run_agent_loop_sync,
     AgentEvent,
@@ -560,103 +563,108 @@ FETCH_TOOL = ToolConfig(
 
 
 # =============================================================================
-# System Prompts
+# System Prompts - Artifact Extraction Only
 # =============================================================================
 
-def _get_system_prompt(source: SourceType, business_name: str, location: str) -> str:
-    """Get the appropriate system prompt for the source."""
+def _get_artifact_extraction_prompt(source: SourceType, business_name: str, entity_url: str) -> str:
+    """
+    Get prompt for artifact extraction from a VERIFIED page.
+    Entity verification is done separately - this agent just extracts reviews.
+    """
 
-    base_instructions = f"""You are a precise research agent collecting reviews for a specific business.
+    if source == "reddit":
+        return f"""You are extracting Reddit posts/comments about a business.
 
-TARGET BUSINESS: "{business_name}" in "{location}"
-SOURCE PLATFORM: {source.upper()}
+TARGET: "{business_name}"
+PLATFORM: Reddit
 
-YOUR TASK HAS TWO PHASES:
+You have search and fetch tools. Find Reddit discussions about this business.
 
-==============================================================================
-PHASE 1: ENTITY RESOLUTION (MUST COMPLETE FIRST)
-==============================================================================
-
-You MUST first verify you can uniquely identify this exact business on {source.upper()}.
-
-Search for the business. Then determine:
-- FOUND: You found exactly ONE matching business entity
-- AMBIGUOUS: You found multiple potential matches
-- NOT_FOUND: You could not find this business on the platform
-
-If AMBIGUOUS or NOT_FOUND, STOP and report immediately.
-
-==============================================================================
-PHASE 2: ARTIFACT COLLECTION (only if Phase 1 succeeded)
-==============================================================================
-
-Collect actual review content. Get REAL TEXT from reviews, not summaries.
-
-==============================================================================
-FINAL OUTPUT - ALWAYS USE THIS JSON FORMAT
-==============================================================================
-
+OUTPUT FORMAT (JSON):
 ```json
 {{
-  "entity_resolution": {{
-    "status": "found" | "ambiguous" | "not_found",
-    "entity": {{
-      "name": "exact name on platform",
-      "url": "direct URL",
-      "platform_id": "if visible",
-      "rating": 4.5,
-      "review_count": 16,
-      "match_confidence": "exact" | "probable" | "uncertain",
-      "match_reason": "why you're confident this is the right business"
+    "artifacts": [
+        {{
+            "text": "the comment or post text",
+            "author": "username",
+            "subreddit": "subreddit name",
+            "url": "permalink",
+            "title": "post title if it's a post",
+            "score": 42,
+            "date": "date if visible"
+        }}
+    ],
+    "analysis": {{
+        "sentiment": "overall sentiment",
+        "themes": ["theme1", "theme2"],
+        "notable_quotes": ["quote1"]
+    }}
+}}
+```
+
+Collect ACTUAL post/comment text, not summaries."""
+
+    # For Yelp/Google - we already have the page content from verification
+    return f"""You are extracting reviews from a business page.
+
+TARGET: "{business_name}"
+URL: {entity_url}
+PLATFORM: {source.upper()}
+
+You have the page content. Extract the actual reviews.
+
+OUTPUT FORMAT (JSON):
+```json
+{{
+    "artifacts": [
+        {{
+            "rating": 5,
+            "text": "actual review text verbatim",
+            "author": "reviewer name",
+            "date": "date if shown"
+        }}
+    ],
+    "rating_summary": {{
+        "overall": 4.5,
+        "total_reviews": 123
     }},
-    "candidates": []  // if ambiguous, list alternatives
-  }},
-  "artifacts": [
-    {{"rating": 5, "text": "actual review text...", "author": "Name", "date": "date"}}
-  ],
-  "analysis": {{
-    "sentiment": "overall sentiment description",
-    "themes": ["theme1", "theme2"],
-    "notable_quotes": ["quote1", "quote2"]
-  }},
-  "collection_notes": "Brief notes on how collection went, any issues"
+    "analysis": {{
+        "sentiment": "overall sentiment",
+        "themes": ["theme1", "theme2"],
+        "notable_quotes": ["quote1"]
+    }}
 }}
 ```
 
 RULES:
-1. Entity resolution MUST succeed before collecting artifacts
-2. If entity not found or ambiguous, return immediately with status
-3. Artifacts must be ACTUAL review text, not summaries
-4. Be specific in match_reason - address, phone, name match, etc.
-"""
+- Extract ACTUAL review text, not summaries
+- Include as many reviews as visible on the page
+- Preserve exact wording from reviews"""
 
-    if source == "yelp":
-        source_instructions = """
-YELP SPECIFICS:
-- Business URLs look like: yelp.com/biz/business-name-city
-- Rating is X.X out of 5 stars
-- Look for "Recommended Reviews" section
-- Note if page seems blocked or limited
-"""
-    elif source == "google":
-        source_instructions = """
-GOOGLE SPECIFICS:
-- Look for Google Business Profile / Google Maps listing
-- Rating is X.X out of 5 stars
-- Reviews may be in search snippets or Maps
-"""
-    elif source == "reddit":
-        source_instructions = """
-REDDIT SPECIFICS:
-- Search: site:reddit.com "business name" location
-- Collect posts AND comments mentioning the business
-- Note the subreddit and vote score
-- Artifacts should include: title, text, author, subreddit, score, url
-"""
-    else:
-        source_instructions = ""
 
-    return base_instructions + source_instructions
+def _get_page_extraction_prompt(source: SourceType, business_name: str, page_content: str) -> str:
+    """
+    Direct extraction prompt when we already have page content (no agent needed).
+    """
+    return f"""Extract reviews from this {source.upper()} page for "{business_name}".
+
+PAGE CONTENT:
+---
+{page_content}
+---
+
+Extract all visible reviews into this JSON format:
+```json
+{{
+    "artifacts": [
+        {{"rating": 5, "text": "review text", "author": "name", "date": "date"}}
+    ],
+    "rating_summary": {{"overall": 4.5, "total_reviews": 123}},
+    "analysis": {{"sentiment": "...", "themes": ["..."], "notable_quotes": ["..."]}}
+}}
+```
+
+Return ACTUAL review text, not summaries. Include all visible reviews."""
 
 
 # =============================================================================
@@ -669,7 +677,13 @@ def execute_review_collector(
     user_id: int,
     context: Dict[str, Any]
 ) -> Generator[ToolProgress, None, ToolResult]:
-    """Execute the review collector for a single source."""
+    """
+    Execute the review collector for a single source.
+
+    Two-phase architecture:
+    1. Entity Verification (orchestrated workflow, not autonomous agent)
+    2. Artifact Extraction (simple LLM call or agent for Reddit)
+    """
     global _current_tracker
 
     business_name = params.get("business_name", "")
@@ -694,19 +708,233 @@ def execute_review_collector(
         data={"business_name": business_name, "location": location, "source": source}
     )
 
-    # Build the system prompt
-    system_prompt = _get_system_prompt(source, business_name, location)
+    # ==========================================================================
+    # PHASE 1: Entity Verification (Orchestrated Workflow)
+    # ==========================================================================
+
+    verification_result = None
+
+    # For Reddit, we don't need strict entity verification - we search for mentions
+    if source == "reddit":
+        yield ToolProgress(
+            stage="reddit_mode",
+            message="Reddit mode: searching for mentions",
+            data={}
+        )
+        # Skip entity verification for Reddit - go straight to agent collection
+        verification_result = None
+    else:
+        # Run entity verification workflow
+        verification_gen = verify_entity(
+            business_name=business_name,
+            location=location,
+            source=source,
+            db=db,
+            user_id=user_id,
+            context=context
+        )
+
+        # Forward progress from verification
+        try:
+            while True:
+                progress = next(verification_gen)
+                # Convert verification progress to ToolProgress
+                stage = progress.get("stage", "verifying")
+                message = progress.get("message", "Verifying entity")
+                iteration = progress.get("iteration", 1)
+
+                # Track steps in journey
+                if stage == "searching":
+                    _current_tracker.start_step("search", message)
+                elif stage == "fetching":
+                    _current_tracker.start_step("fetch", message)
+                elif stage in ("confirmed", "no_results", "blocked", "no_match", "gave_up"):
+                    if _current_tracker._step_start_time:
+                        status = "success" if stage == "confirmed" else "failed"
+                        _current_tracker.complete_step(status, [message])
+
+                yield ToolProgress(
+                    stage=f"verify_{stage}",
+                    message=message,
+                    data={"iteration": iteration, "phase": "entity_verification"}
+                )
+
+        except StopIteration as e:
+            verification_result = e.value
+
+        # Handle verification failure
+        if verification_result and verification_result.status != "confirmed":
+            _current_tracker.set_phase_conclusion(
+                verification_result.message,
+                "failed"
+            )
+
+            outcome = Outcome(
+                success=False,
+                status=_map_verification_status(verification_result.status),
+                confidence="low",
+                summary=verification_result.message
+            )
+
+            result = _current_tracker.finalize(outcome)
+            _current_tracker = None
+
+            yield ToolProgress(
+                stage="verification_failed",
+                message=verification_result.message,
+                data={"status": verification_result.status}
+            )
+
+            return ToolResult(
+                text=_format_text_output(result),
+                data=result.to_dict(),
+                workspace_payload={"type": "review_collection", "data": result.to_dict()}
+            )
+
+        # Entity verified!
+        if verification_result:
+            _current_tracker.entity = Entity(
+                name=verification_result.entity.name,
+                url=verification_result.entity.url,
+                match_confidence=verification_result.entity.confidence,
+                match_reason=verification_result.entity.reason
+            )
+            _current_tracker.set_phase_conclusion(
+                f"Verified: {verification_result.entity.name}",
+                "success"
+            )
+
+    # ==========================================================================
+    # PHASE 2: Artifact Extraction
+    # ==========================================================================
+
+    _current_tracker.start_phase("artifact_collection")
+
+    yield ToolProgress(
+        stage="extracting",
+        message="Extracting reviews",
+        data={"phase": "artifact_collection"}
+    )
+
+    if source == "reddit":
+        # Reddit needs agent-based collection (search + fetch Reddit posts)
+        artifacts_data = yield from _run_reddit_agent(
+            business_name, location, db, user_id, context
+        )
+    else:
+        # Yelp/Google: We have page content from verification - direct extraction
+        if verification_result and verification_result.page_content:
+            artifacts_data = _extract_from_page_content(
+                source, business_name, verification_result.page_content
+            )
+        else:
+            # Fallback: run agent to fetch and extract
+            artifacts_data = yield from _run_extraction_agent(
+                source, business_name, _current_tracker.entity.url,
+                db, user_id, context
+            )
+
+    # ==========================================================================
+    # Build Final Result
+    # ==========================================================================
+
+    yield ToolProgress(
+        stage="finalizing",
+        message="Building result",
+        data={}
+    )
+
+    result = _build_final_result(
+        tracker=_current_tracker,
+        artifacts_data=artifacts_data,
+        source=source
+    )
+
+    _current_tracker = None
+
+    yield ToolProgress(
+        stage="complete",
+        message=f"Collection {result.outcome.status}: {result.outcome.summary}",
+        data={"success": result.outcome.success}
+    )
+
+    return ToolResult(
+        text=_format_text_output(result),
+        data=result.to_dict(),
+        workspace_payload={"type": "review_collection", "data": result.to_dict()}
+    )
+
+
+def _map_verification_status(status: str) -> OutcomeStatus:
+    """Map verification status to outcome status."""
+    mapping = {
+        "confirmed": "complete",
+        "not_found": "entity_not_found",
+        "ambiguous": "entity_ambiguous",
+        "gave_up": "entity_not_found",
+        "error": "error"
+    }
+    return mapping.get(status, "error")
+
+
+def _extract_from_page_content(source: str, business_name: str, page_content: str) -> Dict:
+    """
+    Direct LLM extraction from already-fetched page content.
+    No agent loop needed - single LLM call.
+    """
+    import anthropic
+
+    prompt = _get_page_extraction_prompt(source, business_name, page_content)
+
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model=AGENT_MODEL,
+        max_tokens=4096,
+        temperature=0,
+        messages=[{"role": "user", "content": prompt}]
+    )
+
+    response_text = response.content[0].text
+
+    # Parse JSON response
+    parsed = None
+    json_match = re.search(r'```json\s*(.*?)\s*```', response_text, re.DOTALL)
+    if json_match:
+        try:
+            parsed = json.loads(json_match.group(1))
+        except json.JSONDecodeError:
+            pass
+
+    if not parsed:
+        try:
+            parsed = json.loads(response_text)
+        except json.JSONDecodeError:
+            parsed = {"artifacts": [], "analysis": {}}
+
+    return parsed
+
+
+def _run_reddit_agent(
+    business_name: str,
+    location: str,
+    db: Session,
+    user_id: int,
+    context: Dict
+) -> Generator[ToolProgress, None, Dict]:
+    """Run agent to collect Reddit mentions."""
+    global _current_tracker
+
+    system_prompt = _get_artifact_extraction_prompt("reddit", business_name, "")
 
     messages = [
         {
             "role": "user",
-            "content": f"Find and collect {source} reviews for {business_name} in {location}."
+            "content": f"Find Reddit discussions about {business_name} in {location}."
         }
     ]
 
     tools = {"search": SEARCH_TOOL, "fetch": FETCH_TOOL}
 
-    # Queue for events
     event_queue: queue.Queue = queue.Queue()
     result_holder: List[Any] = [None, None, None]
 
@@ -732,20 +960,17 @@ def execute_review_collector(
             result_holder[1] = tool_calls
             result_holder[2] = error
         except Exception as e:
-            logger.error(f"Agent thread error: {e}", exc_info=True)
+            logger.error(f"Reddit agent error: {e}", exc_info=True)
             result_holder[2] = str(e)
         finally:
             event_queue.put(None)
 
-    # Start agent
     agent_thread = threading.Thread(target=run_agent, daemon=True)
     agent_thread.start()
 
-    # Yield progress events with better status messages
-    step_count = 0
+    # Forward progress
     search_count = 0
     fetch_count = 0
-    blocked_count = 0
 
     while True:
         try:
@@ -754,164 +979,35 @@ def execute_review_collector(
                 break
 
             if isinstance(event, AgentToolStart):
-                step_count += 1
-                tool_name = event.tool_name
-
-                # Build a more informative message
-                if tool_name == "search":
+                if event.tool_name == "search":
                     search_count += 1
-                    query = event.tool_input.get("query", "") if isinstance(event.tool_input, dict) else str(event.tool_input)
-                    # Extract the key part of the query
-                    if "site:yelp.com" in query:
-                        stage = "searching_yelp"
-                        message = f"Searching Yelp [{search_count}]"
-                    elif "site:reddit.com" in query:
-                        stage = "searching_reddit"
-                        message = f"Searching Reddit [{search_count}]"
-                    elif "site:google.com" in query or "site:maps.google.com" in query:
-                        stage = "searching_google"
-                        message = f"Searching Google [{search_count}]"
-                    else:
-                        stage = "searching"
-                        message = f"Web search [{search_count}]"
+                    _current_tracker.start_step("search", str(event.tool_input))
+                    yield ToolProgress(
+                        stage="reddit_search",
+                        message=f"Searching Reddit [{search_count}]",
+                        data={"search_count": search_count}
+                    )
                 else:
                     fetch_count += 1
-                    url = event.tool_input.get("url", "") if isinstance(event.tool_input, dict) else str(event.tool_input)
-                    # Extract domain from URL
-                    if "yelp.com" in url:
-                        stage = "fetching_yelp"
-                        message = f"Fetching Yelp page [{fetch_count}]"
-                    elif "healthgrades.com" in url:
-                        stage = "fetching_healthgrades"
-                        message = f"Fetching Healthgrades [{fetch_count}]"
-                    elif "reddit.com" in url:
-                        stage = "fetching_reddit"
-                        message = f"Fetching Reddit [{fetch_count}]"
-                    else:
-                        stage = "fetching"
-                        message = f"Fetching page [{fetch_count}]"
-
-                yield ToolProgress(
-                    stage=stage,
-                    message=message,
-                    data={
-                        "tool": tool_name,
-                        "input": event.tool_input,
-                        "step": step_count,
-                        "searches": search_count,
-                        "fetches": fetch_count
-                    }
-                )
+                    _current_tracker.start_step("fetch", str(event.tool_input))
+                    yield ToolProgress(
+                        stage="reddit_fetch",
+                        message=f"Fetching Reddit [{fetch_count}]",
+                        data={"fetch_count": fetch_count}
+                    )
 
             elif isinstance(event, AgentToolComplete):
-                tool_name = event.tool_name
-                result_text = event.result_text or ""
-
-                # Check for blocking
-                was_blocked = "BLOCKED" in result_text or "403" in result_text
-
-                if was_blocked:
-                    blocked_count += 1
-                    stage = "blocked"
-                    message = f"Blocked by site [{blocked_count}]"
-                elif tool_name == "search":
-                    # Extract result count if possible
-                    if "No results found" in result_text:
-                        stage = "search_empty"
-                        message = "No results found"
-                    elif "Found " in result_text:
-                        # Try to extract count
-                        import re
-                        match = re.search(r'Found (\d+) results', result_text)
-                        if match:
-                            count = match.group(1)
-                            stage = "search_results"
-                            message = f"Found {count} results"
-                        else:
-                            stage = "search_complete"
-                            message = "Search complete"
-                    else:
-                        stage = "search_complete"
-                        message = "Search complete"
-                else:
-                    # Fetch complete
-                    if "review" in result_text.lower():
-                        stage = "content_found"
-                        message = "Found review content"
-                    else:
-                        stage = "fetch_complete"
-                        message = "Page loaded"
-
-                yield ToolProgress(
-                    stage=stage,
-                    message=message,
-                    data={
-                        "tool": tool_name,
-                        "step": step_count,
-                        "blocked": blocked_count
-                    }
-                )
+                _current_tracker.complete_step("success", [])
 
         except queue.Empty:
             continue
 
     agent_thread.join(timeout=5.0)
 
-    yield ToolProgress(
-        stage="parsing",
-        message="Parsing agent results",
-        data={}
-    )
-
-    # Parse and build result
-    result = _parse_agent_output(
-        tracker=_current_tracker,
-        agent_text=result_holder[0] or "",
-        tool_calls=result_holder[1] or [],
-        error=result_holder[2]
-    )
-
-    # Clear global tracker
-    _current_tracker = None
-
-    # Build text output for chat
-    text_output = _format_text_output(result)
-
-    yield ToolProgress(
-        stage="complete",
-        message=f"Collection {result.outcome.status}: {result.outcome.summary}",
-        data={"success": result.outcome.success}
-    )
-
-    return ToolResult(
-        text=text_output,
-        data=result.to_dict(),
-        workspace_payload={
-            "type": "review_collection",
-            "data": result.to_dict()
-        }
-    )
-
-
-def _parse_agent_output(
-    tracker: JourneyTracker,
-    agent_text: str,
-    tool_calls: List[Dict],
-    error: Optional[str]
-) -> ReviewCollectionResult:
-    """Parse the agent's output and finalize the journey."""
-
-    if error:
-        tracker.set_phase_conclusion(f"Agent error: {error}", "failed")
-        return tracker.finalize(Outcome(
-            success=False,
-            status="error",
-            confidence="low",
-            summary=f"Agent error: {error}"
-        ))
-
-    # Try to parse JSON
+    # Parse result
+    agent_text = result_holder[0] or ""
     parsed = None
+
     json_match = re.search(r'```json\s*(.*?)\s*```', agent_text, re.DOTALL)
     if json_match:
         try:
@@ -923,64 +1019,118 @@ def _parse_agent_output(
         try:
             parsed = json.loads(agent_text)
         except json.JSONDecodeError:
+            parsed = {"artifacts": [], "analysis": {}}
+
+    return parsed
+
+
+def _run_extraction_agent(
+    source: str,
+    business_name: str,
+    entity_url: str,
+    db: Session,
+    user_id: int,
+    context: Dict
+) -> Generator[ToolProgress, None, Dict]:
+    """Fallback: run agent to fetch and extract reviews."""
+    global _current_tracker
+
+    system_prompt = _get_artifact_extraction_prompt(source, business_name, entity_url)
+
+    messages = [
+        {
+            "role": "user",
+            "content": f"Fetch {entity_url} and extract the reviews."
+        }
+    ]
+
+    tools = {"search": SEARCH_TOOL, "fetch": FETCH_TOOL}
+
+    event_queue: queue.Queue = queue.Queue()
+    result_holder: List[Any] = [None, None, None]
+
+    def run_agent():
+        def on_event(event: AgentEvent):
+            event_queue.put(event)
+
+        try:
+            final_text, tool_calls, error = run_agent_loop_sync(
+                model=AGENT_MODEL,
+                max_tokens=8096,
+                max_iterations=10,
+                system_prompt=system_prompt,
+                messages=messages,
+                tools=tools,
+                db=db,
+                user_id=user_id,
+                context=context,
+                temperature=0.2,
+                on_event=on_event
+            )
+            result_holder[0] = final_text
+            result_holder[1] = tool_calls
+            result_holder[2] = error
+        except Exception as e:
+            logger.error(f"Extraction agent error: {e}", exc_info=True)
+            result_holder[2] = str(e)
+        finally:
+            event_queue.put(None)
+
+    agent_thread = threading.Thread(target=run_agent, daemon=True)
+    agent_thread.start()
+
+    while True:
+        try:
+            event = event_queue.get(timeout=0.5)
+            if event is None:
+                break
+
+            if isinstance(event, AgentToolStart):
+                if event.tool_name == "fetch":
+                    _current_tracker.start_step("fetch", str(event.tool_input))
+                    yield ToolProgress(
+                        stage="extracting_fetch",
+                        message=f"Fetching {source.upper()} page",
+                        data={}
+                    )
+
+            elif isinstance(event, AgentToolComplete):
+                _current_tracker.complete_step("success", [])
+
+        except queue.Empty:
+            continue
+
+    agent_thread.join(timeout=5.0)
+
+    # Parse result
+    agent_text = result_holder[0] or ""
+    parsed = None
+
+    json_match = re.search(r'```json\s*(.*?)\s*```', agent_text, re.DOTALL)
+    if json_match:
+        try:
+            parsed = json.loads(json_match.group(1))
+        except json.JSONDecodeError:
             pass
 
     if not parsed:
-        tracker.set_phase_conclusion("Could not parse agent output", "failed")
-        tracker.add_obstacle("parse_error", "Agent output not valid JSON", "Could not extract structured data")
-        return tracker.finalize(Outcome(
-            success=False,
-            status="error",
-            confidence="low",
-            summary="Could not parse agent response"
-        ))
+        try:
+            parsed = json.loads(agent_text)
+        except json.JSONDecodeError:
+            parsed = {"artifacts": [], "analysis": {}}
 
-    # Parse entity resolution
-    entity_res = parsed.get("entity_resolution", {})
-    entity_status = entity_res.get("status", "not_found")
+    return parsed
 
-    if entity_status == "not_found":
-        tracker.set_phase_conclusion("Entity not found on platform", "failed")
-        return tracker.finalize(Outcome(
-            success=False,
-            status="entity_not_found",
-            confidence="low",
-            summary=f"Could not find {tracker.request.business_name} on {tracker.request.source.upper()}"
-        ))
 
-    if entity_status == "ambiguous":
-        candidates = entity_res.get("candidates", [])
-        tracker.set_phase_conclusion(f"Found {len(candidates)} potential matches, could not resolve", "failed")
-        return tracker.finalize(Outcome(
-            success=False,
-            status="entity_ambiguous",
-            confidence="low",
-            summary=f"Found multiple potential matches, could not uniquely identify"
-        ))
-
-    # Entity found - parse it
-    entity_data = entity_res.get("entity", {})
-    tracker.entity = Entity(
-        name=entity_data.get("name", tracker.request.business_name),
-        url=entity_data.get("url", ""),
-        platform_id=entity_data.get("platform_id"),
-        rating=entity_data.get("rating"),
-        review_count=entity_data.get("review_count"),
-        match_confidence=entity_data.get("match_confidence", "uncertain"),
-        match_reason=entity_data.get("match_reason", "")
-    )
-
-    tracker.set_phase_conclusion(
-        f"Found: {tracker.entity.name} ({tracker.entity.match_confidence} match)",
-        "success"
-    )
-
-    # Start artifact collection phase
-    tracker.start_phase("artifact_collection")
+def _build_final_result(
+    tracker: JourneyTracker,
+    artifacts_data: Dict,
+    source: str
+) -> ReviewCollectionResult:
+    """Build the final result from artifacts data."""
 
     # Parse artifacts
-    source = tracker.request.source
-    for artifact_data in parsed.get("artifacts", []):
+    for artifact_data in artifacts_data.get("artifacts", []):
         if source == "reddit":
             tracker.artifacts.append(RedditArtifact(
                 text=artifact_data.get("text", ""),
@@ -1001,7 +1151,7 @@ def _parse_agent_output(
             ))
 
     # Parse analysis
-    analysis_data = parsed.get("analysis", {})
+    analysis_data = artifacts_data.get("analysis", {})
     if analysis_data:
         tracker.analysis = Analysis(
             sentiment=analysis_data.get("sentiment", ""),
@@ -1009,47 +1159,40 @@ def _parse_agent_output(
             notable_quotes=analysis_data.get("notable_quotes", [])
         )
 
+    # Update rating info from rating_summary if present
+    rating_summary = artifacts_data.get("rating_summary", {})
+    if rating_summary and tracker.entity:
+        tracker.entity.rating = rating_summary.get("overall")
+        tracker.entity.review_count = rating_summary.get("total_reviews")
+
     # Determine outcome
     artifact_count = len(tracker.artifacts)
-    review_count = tracker.entity.review_count or 0
 
     if artifact_count == 0:
-        if tracker.journey.tool_calls.fetches["blocked"] > 0:
-            tracker.set_phase_conclusion("Blocked from accessing review content", "failed")
-            return tracker.finalize(Outcome(
-                success=False,
-                status="blocked",
-                confidence="medium",
-                summary=f"Found entity but blocked from accessing reviews"
-            ))
-        else:
-            tracker.set_phase_conclusion("No reviews extracted", "failed")
-            return tracker.finalize(Outcome(
-                success=False,
-                status="partial",
-                confidence="medium",
-                summary=f"Found entity but could not extract review content"
-            ))
+        tracker.set_phase_conclusion("No reviews extracted", "failed")
+        return tracker.finalize(Outcome(
+            success=False,
+            status="partial",
+            confidence="medium",
+            summary="Entity found but no reviews extracted"
+        ))
 
-    # Success case
-    if review_count > 0 and artifact_count < review_count:
-        tracker.set_phase_conclusion(f"Collected {artifact_count} of {review_count} reviews", "partial")
-        status = "partial"
-        confidence = "medium"
-    else:
-        tracker.set_phase_conclusion(f"Collected {artifact_count} reviews", "success")
-        status = "complete"
-        confidence = "high" if tracker.entity.match_confidence == "exact" else "medium"
+    # Success
+    tracker.set_phase_conclusion(f"Collected {artifact_count} reviews", "success")
 
-    rating_str = f"{tracker.entity.rating}★" if tracker.entity.rating else ""
+    entity_name = tracker.entity.name if tracker.entity else tracker.request.business_name
+    rating_str = f"{tracker.entity.rating}★" if tracker.entity and tracker.entity.rating else ""
+
     summary = f"Found {artifact_count} reviews"
     if rating_str:
-        summary += f" • {rating_str} rating"
-    summary += f" • {tracker.entity.name}"
+        summary += f" • {rating_str}"
+    summary += f" • {entity_name}"
+
+    confidence = "high" if tracker.entity and tracker.entity.match_confidence == "high" else "medium"
 
     return tracker.finalize(Outcome(
         success=True,
-        status=status,
+        status="complete",
         confidence=confidence,
         summary=summary
     ))
