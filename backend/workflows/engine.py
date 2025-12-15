@@ -352,7 +352,13 @@ class WorkflowEngine:
                     return
 
             elif node.node_type == "checkpoint":
-                # Pause at checkpoint
+                # Pause at checkpoint - persist state BEFORE yielding event
+                # to avoid race condition where frontend fetches stale state
+                instance.status = WorkflowStatus.WAITING
+                node_state.status = "running"  # Waiting at checkpoint
+                node_state.started_at = datetime.utcnow()
+                self._persist(instance)
+
                 yield EngineEvent(
                     event_type="checkpoint",
                     instance_id=instance.id,
@@ -369,10 +375,6 @@ class WorkflowEngine:
                         "ui_component": node.ui_component
                     }
                 )
-                instance.status = WorkflowStatus.WAITING
-                node_state.status = "running"  # Waiting at checkpoint
-                node_state.started_at = datetime.utcnow()
-                self._persist(instance)
                 return  # Pause execution, wait for resume()
 
     async def _execute_node(

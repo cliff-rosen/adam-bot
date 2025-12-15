@@ -180,37 +180,64 @@ function CheckpointPanel({
         setEditValues({});
     };
 
-    // Render checklist items
+    // Render checklist items with findings
     const renderChecklistItems = (items: any[]) => (
-        <div className="space-y-2">
+        <div className="space-y-3">
             {items.map((item: any) => (
                 <div
                     key={item.id}
-                    className="flex items-start gap-3 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                    className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
                 >
-                    <span className={`w-2 h-2 mt-2 rounded-full flex-shrink-0 ${
-                        item.status === 'complete' ? 'bg-emerald-500' :
-                        item.status === 'partial' ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'
-                    }`} />
-                    <div className="flex-1 min-w-0">
-                        <div className="font-medium text-gray-900 dark:text-white text-sm">
-                            {item.description}
-                        </div>
-                        {item.rationale && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                                {item.rationale}
+                    <div className="flex items-start gap-3">
+                        <span className={`w-2 h-2 mt-2 rounded-full flex-shrink-0 ${
+                            item.status === 'complete' ? 'bg-emerald-500' :
+                            item.status === 'partial' ? 'bg-amber-500' : 'bg-gray-300 dark:bg-gray-600'
+                        }`} />
+                        <div className="flex-1 min-w-0">
+                            <div className="font-medium text-gray-900 dark:text-white text-sm">
+                                {item.description}
                             </div>
-                        )}
-                        <div className="flex items-center gap-2 mt-1">
-                            <span className={`text-xs px-1.5 py-0.5 rounded ${
-                                item.priority === 'high' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
-                                item.priority === 'medium' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' :
-                                'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
-                            }`}>
-                                {item.priority}
-                            </span>
+                            <div className="flex items-center gap-2 mt-1">
+                                <span className={`text-xs px-1.5 py-0.5 rounded ${
+                                    item.priority === 'high' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' :
+                                    item.priority === 'medium' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400' :
+                                    'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+                                }`}>
+                                    {item.priority}
+                                </span>
+                                {item.findings && item.findings.length > 0 && (
+                                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                                        {item.findings.length} finding{item.findings.length !== 1 ? 's' : ''}
+                                    </span>
+                                )}
+                            </div>
                         </div>
                     </div>
+                    {/* Show findings if present */}
+                    {item.findings && item.findings.length > 0 && (
+                        <div className="mt-2 ml-5 space-y-1.5">
+                            {item.findings.slice(0, 5).map((finding: any, idx: number) => (
+                                <div key={idx} className="text-xs bg-white dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-700">
+                                    <p className="text-gray-700 dark:text-gray-300">{finding.content}</p>
+                                    {finding.source && (
+                                        <a
+                                            href={finding.source}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-blue-500 hover:underline mt-1 block truncate"
+                                        >
+                                            {finding.source}
+                                        </a>
+                                    )}
+                                </div>
+                            ))}
+                            {item.findings.length > 5 && (
+                                <p className="text-xs text-gray-500 dark:text-gray-400 italic">
+                                    +{item.findings.length - 5} more findings
+                                </p>
+                            )}
+                        </div>
+                    )}
                 </div>
             ))}
         </div>
@@ -224,13 +251,29 @@ function CheckpointPanel({
             return <MarkdownRenderer content={stepData} />;
         }
 
-        // Checklist items (from build_checklist step)
+        // Checklist items with retrieval findings (from run_retrieval step)
         if (stepData.items && Array.isArray(stepData.items)) {
+            const completedCount = stepData.items.filter((i: any) => i.status === 'complete').length;
+            const partialCount = stepData.items.filter((i: any) => i.status === 'partial').length;
+
             return (
                 <div className="text-gray-900 dark:text-gray-100">
                     <p className="mb-3"><strong>Question:</strong> {stepData.refined_question}</p>
+
+                    {/* Show retrieval stats if present */}
+                    {(stepData.current_iteration || stepData.sources) && (
+                        <div className="mb-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded text-sm">
+                            {stepData.current_iteration && (
+                                <span className="mr-4">Iterations: {stepData.current_iteration}</span>
+                            )}
+                            {stepData.sources && (
+                                <span>Sources consulted: {stepData.sources.length}</span>
+                            )}
+                        </div>
+                    )}
+
                     <p className="font-medium text-sm text-gray-700 dark:text-gray-300 mb-2">
-                        Checklist Items ({stepData.items.length})
+                        Checklist Progress: {completedCount} complete, {partialCount} partial, {stepData.items.length - completedCount - partialCount} pending
                     </p>
                     {renderChecklistItems(stepData.items)}
                 </div>
