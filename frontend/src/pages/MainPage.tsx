@@ -714,6 +714,7 @@ export default function MainPage() {
                 streamingText={streamingText}
                 statusText={statusText}
                 activeToolProgress={activeToolProgress}
+                isSavingAsset={isSavingAsset}
                 onSendMessage={handleSendMessage}
                 onCancel={cancelRequest}
                 onClearChat={handleClearChat}

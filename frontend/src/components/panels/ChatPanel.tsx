@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { PaperAirplaneIcon, WrenchScrewdriverIcon, DocumentPlusIcon, ArrowTopRightOnSquareIcon, StopIcon, TrashIcon } from '@heroicons/react/24/solid';
+import { PaperAirplaneIcon, WrenchScrewdriverIcon, DocumentPlusIcon, ArrowTopRightOnSquareIcon, StopIcon, TrashIcon, ArrowPathIcon } from '@heroicons/react/24/solid';
 import { MarkdownRenderer } from '../common';
 import { GeneralChatMessage, ToolCall, SuggestedValue, SuggestedAction, WorkspacePayload, parseWorkspacePayload } from '../../types/chat';
 import { ActiveToolProgress } from '../../hooks/useGeneralChat';
@@ -11,6 +11,7 @@ interface ChatPanelProps {
     streamingText: string;
     statusText: string | null;
     activeToolProgress: ActiveToolProgress | null;
+    isSavingAsset?: boolean;
     onSendMessage: (message: string) => void;
     onCancel: () => void;
     onClearChat: () => void;
@@ -29,6 +30,7 @@ export default function ChatPanel({
     streamingText,
     statusText,
     activeToolProgress,
+    isSavingAsset = false,
     onSendMessage,
     onCancel,
     onClearChat,
@@ -261,14 +263,19 @@ export default function ChatPanel({
                                         {/* Save as asset button */}
                                         <button
                                             onClick={() => onSaveMessageAsAsset(message)}
-                                            className={`flex items-center gap-1 text-xs hover:opacity-80 ${
+                                            disabled={isSavingAsset}
+                                            className={`flex items-center gap-1 text-xs hover:opacity-80 disabled:opacity-50 disabled:cursor-not-allowed ${
                                                 message.role === 'user'
                                                     ? 'text-blue-200'
                                                     : 'text-gray-500 dark:text-gray-400'
                                             }`}
                                             title="Save as asset"
                                         >
-                                            <DocumentPlusIcon className="h-3 w-3" />
+                                            {isSavingAsset ? (
+                                                <ArrowPathIcon className="h-3 w-3 animate-spin" />
+                                            ) : (
+                                                <DocumentPlusIcon className="h-3 w-3" />
+                                            )}
                                         </button>
                                     </div>
                                 </div>
