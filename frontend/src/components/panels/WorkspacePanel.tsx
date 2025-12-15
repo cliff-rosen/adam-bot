@@ -11,6 +11,7 @@ import {
     TablePayloadView,
     WorkflowPipelineView,
     ResearchWorkflowView,
+    ResearchResultView,
     WorkflowExecutionView,
     payloadTypeConfig
 } from './workspace';
@@ -98,16 +99,18 @@ export default function WorkspacePanel({
     const isWorkflowMode = activeWorkflow || (activePayload?.type === 'plan');
     const isWorkflowRelatedPayload = activePayload?.type === 'plan' || activePayload?.type === 'wip' || activePayload?.type === 'final';
     const isResearchWorkflow = activePayload?.type === 'research';
+    const isResearchResult = activePayload?.type === 'research_result';
 
     // Determine what to show
     const showWorkflowEngine = isWorkflowEngineMode && !selectedToolHistory && !selectedTool;
     const showWorkflowPipeline = !showWorkflowEngine && (isWorkflowMode || (isWorkflowRelatedPayload && !selectedToolHistory && !selectedTool));
     const showResearchWorkflow = !showWorkflowEngine && isResearchWorkflow && !selectedToolHistory && !selectedTool;
-    const showExecuting = !showWorkflowEngine && executingStep !== null && !showWorkflowPipeline && !showResearchWorkflow;
-    const showPayload = !showWorkflowEngine && activePayload && !selectedToolHistory && !selectedTool && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow;
-    const showToolResult = !showWorkflowEngine && selectedTool && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow;
-    const showToolHistory = !showWorkflowEngine && selectedToolHistory && selectedToolHistory.length > 0 && !selectedTool && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow;
-    const showEmpty = !showPayload && !showToolHistory && !showToolResult && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow && !showWorkflowEngine;
+    const showResearchResult = !showWorkflowEngine && isResearchResult && !selectedToolHistory && !selectedTool;
+    const showExecuting = !showWorkflowEngine && executingStep !== null && !showWorkflowPipeline && !showResearchWorkflow && !showResearchResult;
+    const showPayload = !showWorkflowEngine && activePayload && !selectedToolHistory && !selectedTool && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow && !showResearchResult;
+    const showToolResult = !showWorkflowEngine && selectedTool && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow && !showResearchResult;
+    const showToolHistory = !showWorkflowEngine && selectedToolHistory && selectedToolHistory.length > 0 && !selectedTool && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow && !showResearchResult;
+    const showEmpty = !showPayload && !showToolHistory && !showToolResult && !showExecuting && !showWorkflowPipeline && !showResearchWorkflow && !showResearchResult && !showWorkflowEngine;
 
     // For workflow engine, render with WorkflowExecutionView
     if (showWorkflowEngine && workflowInstance && workflowHandlers) {
@@ -133,6 +136,18 @@ export default function WorkspacePanel({
                     onPauseRetrieval={onResearchPauseRetrieval || (() => {})}
                     onCompileFinal={onResearchCompile || (() => {})}
                     onComplete={onResearchComplete || (() => {})}
+                />
+            </div>
+        );
+    }
+
+    // For research result (from deep_research tool), render with ResearchResultView
+    if (showResearchResult && activePayload) {
+        return (
+            <div className="flex flex-col h-full bg-gray-50 dark:bg-gray-950">
+                <ResearchResultView
+                    payload={activePayload}
+                    onSaveAsAsset={onSavePayloadAsAsset}
                 />
             </div>
         );

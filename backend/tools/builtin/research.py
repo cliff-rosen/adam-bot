@@ -622,15 +622,19 @@ class DeepResearchEngine:
 
         synthesis = response.content[0].text
 
-        # Add sources
+        # Build text response with sources
+        text_with_sources = synthesis
         if state.all_sources:
-            synthesis += "\n\n**Sources:**\n"
+            text_with_sources += "\n\n**Sources:**\n"
             for url in state.all_sources[:10]:
-                synthesis += f"- {url}\n"
+                text_with_sources += f"- {url}\n"
+
+        # Build checklist summary for workspace payload
+        checklist_summary = state.checklist_summary()
 
         # Build structured data for potential UI use
         return ToolResult(
-            text=synthesis,
+            text=text_with_sources,
             data={
                 "type": "research_result",
                 "topic": topic,
@@ -638,7 +642,21 @@ class DeepResearchEngine:
                 "checklist": [item.to_dict() for item in state.checklist],
                 "sources": state.all_sources,
                 "iterations": state.iteration,
-                "synthesis": synthesis  # Include for UI display
+                "synthesis": synthesis
+            },
+            # Workspace payload for display in the workspace panel
+            workspace_payload={
+                "type": "research_result",
+                "title": f"Research: {topic}",
+                "content": synthesis,  # Required field - main answer content
+                "topic": topic,
+                "goal": state.goal,
+                "synthesis": synthesis,
+                "checklist": [item.to_dict() for item in state.checklist],
+                "checklist_summary": checklist_summary,
+                "sources": state.all_sources,
+                "iterations": state.iteration,
+                "queries_used": state.search_queries_used
             }
         )
 
@@ -689,6 +707,31 @@ DEEP_RESEARCH_TOOL = ToolConfig(
             }
         },
         "required": ["topic"]
+    },
+    output_schema={
+        "type": "object",
+        "properties": {
+            "type": {"type": "string", "const": "research_result"},
+            "topic": {"type": "string", "description": "The research topic"},
+            "goal": {"type": "string", "description": "The research goal"},
+            "synthesis": {"type": "string", "description": "Synthesized research summary"},
+            "checklist": {
+                "type": "array",
+                "description": "Research checklist with findings",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "question": {"type": "string"},
+                        "status": {"type": "string", "enum": ["unfilled", "partial", "complete"]},
+                        "findings": {"type": "array", "items": {"type": "string"}},
+                        "sources": {"type": "array", "items": {"type": "string"}}
+                    }
+                }
+            },
+            "sources": {"type": "array", "items": {"type": "string"}, "description": "All URLs consulted"},
+            "iterations": {"type": "integer", "description": "Number of research iterations performed"}
+        },
+        "required": ["type", "topic", "goal", "synthesis", "checklist", "sources", "iterations"]
     },
     executor=execute_deep_research_streaming,
     category="research",

@@ -106,5 +106,13 @@ export const payloadTypeConfig: Record<string, PayloadTypeConfig> = {
         border: 'border-purple-200 dark:border-purple-800',
         label: 'Research',
         editable: false
+    },
+    research_result: {
+        icon: BeakerIcon,
+        color: 'text-purple-500',
+        bg: 'bg-purple-50 dark:bg-purple-900/20',
+        border: 'border-purple-200 dark:border-purple-800',
+        label: 'Research Results',
+        editable: false
     }
 };

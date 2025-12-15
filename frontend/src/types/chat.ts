@@ -43,7 +43,7 @@ export interface ToolCall {
     workspace_payload?: WorkspacePayload;  // Payload to display in workspace panel
 }
 
-export type WorkspacePayloadType = 'draft' | 'summary' | 'data' | 'code' | 'plan' | 'wip' | 'final' | 'agent_create' | 'agent_update' | 'table' | 'research';
+export type WorkspacePayloadType = 'draft' | 'summary' | 'data' | 'code' | 'plan' | 'wip' | 'final' | 'agent_create' | 'agent_update' | 'table' | 'research' | 'research_result';
 
 // Table payload types for TABILIZER functionality
 export interface TableColumn {
@@ -73,6 +73,25 @@ export interface AgentPayloadData {
     monitor_interval_minutes?: number;
 }
 
+// Research result payload types (from deep_research tool)
+export interface ResearchChecklistItem {
+    question: string;
+    status: 'unfilled' | 'partial' | 'complete';
+    findings: string[];
+    sources: string[];
+}
+
+export interface ResearchResultData {
+    topic: string;
+    goal: string;
+    synthesis: string;
+    checklist: ResearchChecklistItem[];
+    checklist_summary: { unfilled: number; partial: number; complete: number };
+    sources: string[];
+    iterations: number;
+    queries_used: string[];
+}
+
 export interface WorkspacePayload {
     type: WorkspacePayloadType;
     title: string;
@@ -94,6 +113,8 @@ export interface WorkspacePayload {
     table_data?: TablePayloadData;
     // Extended fields for research workflow
     research_data?: ResearchWorkflow;
+    // Extended fields for research result (from deep_research tool)
+    research_result_data?: ResearchResultData;
 }
 
 // ============================================================================
@@ -248,7 +269,7 @@ export interface ResearchSource {
     contribution: string;       // How this source contributed
 }
 
-const VALID_PAYLOAD_TYPES = ['draft', 'summary', 'data', 'code', 'plan', 'wip', 'agent_create', 'agent_update', 'table', 'research'];
+const VALID_PAYLOAD_TYPES = ['draft', 'summary', 'data', 'code', 'plan', 'wip', 'agent_create', 'agent_update', 'table', 'research', 'research_result'];
 
 /**
  * Parse a workspace payload from message content.
