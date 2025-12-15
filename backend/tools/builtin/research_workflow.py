@@ -563,6 +563,13 @@ def execute_research_workflow(
     query = params.get("query", "")
     workflow_state = params.get("workflow_state")
 
+    # Parse workflow_state if it comes as a JSON string
+    if isinstance(workflow_state, str):
+        try:
+            workflow_state = json.loads(workflow_state)
+        except json.JSONDecodeError:
+            return ToolResult(text="Error: Invalid workflow state - could not parse JSON")
+
     engine = ResearchWorkflowEngine()
 
     if action == "start":
