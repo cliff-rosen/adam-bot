@@ -186,32 +186,76 @@ def _execute_search(params: Dict[str, Any], db: Session, user_id: int, context: 
 
 
 def _execute_fetch(params: Dict[str, Any], db: Session, user_id: int, context: Dict) -> ToolResult:
-    """Fetch tool for the review collector agent."""
-    from services.web_retrieval_service import WebRetrievalService
+    """Fetch tool for the review collector agent.
+
+    Uses JavaScript rendering (Playwright) for sites that require it:
+    - yelp.com
+    - google.com/maps
+    - reddit.com (some pages)
+    """
+    from urllib.parse import urlparse
 
     url = params.get("url", "")
     if not url:
         return ToolResult(text="Error: No URL provided")
 
+    # Determine if this URL needs JavaScript rendering
+    parsed = urlparse(url)
+    domain = parsed.netloc.lower()
+
+    js_required_domains = [
+        'yelp.com',
+        'www.yelp.com',
+        'google.com',
+        'www.google.com',
+        'maps.google.com',
+        'healthgrades.com',
+        'www.healthgrades.com',
+    ]
+
+    needs_js = any(domain.endswith(d) or domain == d for d in js_required_domains)
+
     try:
-        web_service = WebRetrievalService()
-
         import asyncio
-        loop = asyncio.new_event_loop()
-        try:
-            result = loop.run_until_complete(
-                web_service.retrieve_webpage(url=url, extract_text_only=True)
-            )
-        finally:
-            loop.close()
 
-        webpage = result["webpage"]
-        content = webpage.content
+        if needs_js:
+            # Use Playwright for JS-heavy sites
+            from services.js_web_retrieval_service import fetch_with_js
 
-        if len(content) > 12000:
-            content = content[:12000] + "\n\n[Content truncated]"
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(
+                    fetch_with_js(url=url, timeout=45000, wait_after_load=3000)
+                )
+            finally:
+                loop.close()
 
-        return ToolResult(text=f"Page: {webpage.title}\nURL: {url}\n\nContent:\n{content}")
+            webpage = result["webpage"]
+            content = webpage.content
+            title = webpage.title
+            load_info = f"[JS-rendered in {webpage.load_time_ms}ms]"
+        else:
+            # Use simple HTTP fetch for other sites
+            from services.web_retrieval_service import WebRetrievalService
+
+            web_service = WebRetrievalService()
+            loop = asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(
+                    web_service.retrieve_webpage(url=url, extract_text_only=True)
+                )
+            finally:
+                loop.close()
+
+            webpage = result["webpage"]
+            content = webpage.content
+            title = webpage.title
+            load_info = ""
+
+        if len(content) > 15000:
+            content = content[:15000] + "\n\n[Content truncated]"
+
+        return ToolResult(text=f"Page: {title} {load_info}\nURL: {url}\n\nContent:\n{content}")
 
     except Exception as e:
         logger.error(f"Fetch error for {url}: {e}")

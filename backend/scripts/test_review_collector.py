@@ -55,15 +55,12 @@ def main():
     print("Testing single-source collection with entity verification")
     print("="*70)
 
-    # Test 1: Yelp with a specific, identifiable business
-    test_collection("Cambridge Endodontics", "Cambridge, MA", "yelp")
+    import sys
+    source = sys.argv[1] if len(sys.argv) > 1 else "yelp"
+    business = sys.argv[2] if len(sys.argv) > 2 else "Cambridge Endodontics"
+    location = sys.argv[3] if len(sys.argv) > 3 else "Cambridge, MA"
 
-    # Uncomment to test other sources:
-    # test_collection("Cambridge Endodontics", "Cambridge, MA", "google")
-    # test_collection("Cambridge Endodontics", "Cambridge, MA", "reddit")
-
-    # Test with an ambiguous name to verify entity resolution failure
-    # test_collection("Eye Care Center", "Boulder, CO", "yelp")
+    test_collection(business, location, source)
 
 
 if __name__ == "__main__":
