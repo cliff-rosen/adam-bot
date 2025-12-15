@@ -408,30 +408,46 @@ def verify_entity(
             search_query = f'{site_op} "{business_name}" "{location}"'
             continue
 
-        # === STEP 3: Fetch the page ===
-        yield {"stage": "fetching", "message": f"Loading {source.upper()} page", "iteration": iteration}
+        # === STEP 3: Fetch the page (with retry on block) ===
+        # Build list of URLs to try: primary candidate + alternatives from search results
+        urls_to_try = [candidate.url]
+        for r in search_results[1:5]:
+            if source in r.url.lower() and r.url not in urls_to_try:
+                urls_to_try.append(r.url)
 
-        step_start = time.time()
-        needs_js = _needs_js_rendering(candidate.url)
-        page_content, was_blocked = _do_fetch(candidate.url, needs_js)
-        step_duration = int((time.time() - step_start) * 1000)
+        page_content = None
+        fetch_succeeded = False
 
-        steps.append(VerificationStep(
-            iteration=iteration,
-            action="fetch",
-            input=candidate.url,
-            output=f"{len(page_content)} chars" + (" [BLOCKED]" if was_blocked else ""),
-            duration_ms=step_duration
-        ))
+        for try_idx, try_url in enumerate(urls_to_try):
+            yield {"stage": "fetching", "message": f"Loading {source.upper()} page" + (f" (attempt {try_idx + 1})" if try_idx > 0 else ""), "iteration": iteration}
 
-        if was_blocked:
-            yield {"stage": "blocked", "message": f"{source.upper()} blocked access, trying alternative", "iteration": iteration}
-            # Try fetching a different result from search
-            for r in search_results[1:4]:
-                if source in r.url.lower():
-                    candidate.url = r.url
-                    break
-            continue
+            step_start = time.time()
+            needs_js = _needs_js_rendering(try_url)
+            content, was_blocked = _do_fetch(try_url, needs_js)
+            step_duration = int((time.time() - step_start) * 1000)
+
+            steps.append(VerificationStep(
+                iteration=iteration,
+                action="fetch",
+                input=try_url,
+                output=f"{len(content)} chars" + (" [BLOCKED]" if was_blocked else ""),
+                duration_ms=step_duration
+            ))
+
+            if was_blocked:
+                yield {"stage": "blocked", "message": f"{source.upper()} blocked access" + (", trying alternative" if try_idx < len(urls_to_try) - 1 else ""), "iteration": iteration}
+                continue  # Try next URL in urls_to_try
+
+            # Success - we got content
+            page_content = content
+            candidate.url = try_url  # Update candidate to the URL that worked
+            fetch_succeeded = True
+            break
+
+        if not fetch_succeeded:
+            yield {"stage": "all_blocked", "message": f"All {source.upper()} URLs blocked, trying new search", "iteration": iteration}
+            search_query = f'{site_op} {business_name} {location.split(",")[0]} reviews'
+            continue  # Go to next iteration with modified search
 
         # === STEP 4: Ask LLM to verify ===
         yield {"stage": "verifying", "message": "Checking if this is the right business", "iteration": iteration}
