@@ -603,9 +603,15 @@ async def enrich_company_info(context: WorkflowContext) -> AsyncGenerator[Union[
 
 async def find_reviews(context: WorkflowContext) -> AsyncGenerator[Union[StepProgress, StepOutput], None]:
     """
-    Step 5: Search for reviews on Yelp, Google, Reddit.
+    Step 5: Use the review collector agent to gather reviews.
+
+    This runs an autonomous agent that:
+    - Searches for business pages on Yelp, Google, etc.
+    - Fetches and reads review pages
+    - Makes decisions about what to search/fetch next
+    - Compiles review data with ratings, counts, and sample reviews
     """
-    from services.search_service import SearchService
+    from tools.builtin.review_collector import ReviewCollectorAgent
 
     vendor_data = context.get_step_output("enrich_company_info")
     if not vendor_data:
@@ -618,165 +624,99 @@ async def find_reviews(context: WorkflowContext) -> AsyncGenerator[Union[StepPro
         yield StepOutput(success=True, data=vendor_data, display_title="No Vendors", display_content="No vendors to find reviews for.")
         return
 
-    yield StepProgress(message=f"Searching reviews for {len(vendors)} vendors...", progress=0.1)
+    yield StepProgress(message=f"Collecting reviews for {len(vendors)} vendors...", progress=0.1)
 
-    search_service = SearchService()
-    if not search_service.initialized:
-        search_service.initialize()
-
-    client = get_llm_client()
     reviewed_vendors = []
 
     for i, vendor in enumerate(vendors):
-        yield StepProgress(
-            message=f"Finding reviews: {vendor['name']}",
-            progress=0.1 + (i / len(vendors)) * 0.8
-        )
-
         vendor_name = vendor["name"]
         location = vendor.get("location", "")
 
+        yield StepProgress(
+            message=f"Agent collecting reviews: {vendor_name}",
+            progress=0.1 + (i / len(vendors)) * 0.8
+        )
+
         reviews = []
 
-        # Search for Yelp reviews
         try:
-            yelp_query = f"{vendor_name} yelp reviews {location}".strip()
-            logger.info(f"[REVIEW TELEMETRY] Yelp query: {yelp_query}")
-            yelp_results = await search_service.search(search_term=yelp_query, num_results=5)
+            # Run the review collector agent
+            agent = ReviewCollectorAgent()
+            generator = agent.run(vendor_name, location)
+            collection_result = None
 
-            raw_results = yelp_results.get("search_results", [])
-            logger.info(f"[REVIEW TELEMETRY] Yelp raw results count: {len(raw_results)}")
-            for idx, r in enumerate(raw_results[:3]):
-                logger.info(f"[REVIEW TELEMETRY] Yelp result {idx}: title={getattr(r, 'title', 'N/A')}, url={getattr(r, 'url', 'N/A')}, snippet_len={len(getattr(r, 'snippet', '') or '')}")
+            try:
+                while True:
+                    item = next(generator)
+                    # Log progress from the agent
+                    if hasattr(item, 'stage'):
+                        data = item.data or {}
+                        if item.stage.startswith("tool_"):
+                            tool = data.get("tool", "")
+                            tool_input = data.get("input", {})
+                            if tool == "search":
+                                logger.info(f"[REVIEW AGENT] {vendor_name}: search '{tool_input.get('query', '')}'")
+                            elif tool == "fetch":
+                                logger.info(f"[REVIEW AGENT] {vendor_name}: fetch {tool_input.get('url', '')}")
+                            elif tool == "report_findings":
+                                logger.info(f"[REVIEW AGENT] {vendor_name}: reporting findings")
+                        else:
+                            logger.info(f"[REVIEW AGENT] {vendor_name}: [{item.stage}] {item.message}")
+            except StopIteration as e:
+                collection_result = e.value
 
-            yelp_snippets = "\n".join(
-                f"- {r.snippet}" for r in raw_results[:3] if getattr(r, 'snippet', None)
-            )
-            logger.info(f"[REVIEW TELEMETRY] Yelp snippets assembled: {len(yelp_snippets)} chars")
+            if collection_result and collection_result.data:
+                result_data = collection_result.data
 
-            if yelp_snippets:
-                response = client.messages.create(
-                    model=MODEL,
-                    max_tokens=256,
-                    messages=[{
-                        "role": "user",
-                        "content": f"""Summarize Yelp reviews for {vendor_name}:
+                # Convert agent results to our ReviewSummary format
+                for source_data in result_data.get('sources', []):
+                    source = source_data.get('source', 'unknown')
+                    rating = source_data.get('rating')
+                    review_count = source_data.get('review_count', 0)
 
-                        {yelp_snippets}
+                    # Only include sources with actual data
+                    if rating is not None or review_count:
+                        # Determine sentiment from rating
+                        if rating is not None:
+                            if rating >= 4.0:
+                                sentiment = "positive"
+                            elif rating >= 3.0:
+                                sentiment = "mixed"
+                            else:
+                                sentiment = "negative"
+                        else:
+                            sentiment = "unknown"
 
-                        Return JSON:
-                        {{"rating": 4.5, "sentiment": "positive/mixed/negative", "highlights": ["good point"], "concerns": ["issue"]}}
-                        JSON:"""
-                    }]
-                )
-                yelp_data = _parse_json(response.content[0].text) or {}
-                # Ensure rating is float
-                rating = yelp_data.get("rating")
-                if rating is not None:
-                    try:
-                        rating = float(rating)
-                    except (ValueError, TypeError):
-                        rating = None
-                logger.info(f"[REVIEW TELEMETRY] Yelp LLM response: {response.content[0].text[:200]}...")
-                logger.info(f"[REVIEW TELEMETRY] Yelp parsed data: {yelp_data}")
-                reviews.append(ReviewSummary(
-                    source="yelp",
-                    rating=rating,
-                    sentiment=yelp_data.get("sentiment", "unknown"),
-                    highlights=yelp_data.get("highlights", []),
-                    concerns=yelp_data.get("concerns", [])
-                ))
-            else:
-                logger.warning(f"[REVIEW TELEMETRY] Yelp - NO SNIPPETS for {vendor_name} despite {len(raw_results)} results")
+                        # Extract sample review text as highlights/concerns
+                        highlights = []
+                        concerns = []
+                        sample_quotes = []
+                        for sample in source_data.get('sample_reviews', []):
+                            sample_rating = sample.get('rating', 3)
+                            sample_text = sample.get('text', '')
+                            sample_quotes.append(sample_text[:200])
+                            if sample_rating >= 4:
+                                highlights.append(sample_text[:100])
+                            elif sample_rating <= 2:
+                                concerns.append(sample_text[:100])
+
+                        reviews.append(ReviewSummary(
+                            source=source,
+                            rating=rating,
+                            review_count=review_count,
+                            sentiment=sentiment,
+                            highlights=highlights[:3],
+                            concerns=concerns[:3],
+                            sample_quotes=sample_quotes[:3]
+                        ))
+
+                        logger.info(f"[REVIEW AGENT] {vendor_name} - {source}: {rating}/5, {review_count} reviews")
+
+                # Log agent summary
+                logger.info(f"[REVIEW AGENT] {vendor_name}: {result_data.get('summary', 'No summary')}")
+
         except Exception as e:
-            logger.warning(f"[REVIEW TELEMETRY] Yelp search error for {vendor_name}: {e}")
-
-        # Search for Google reviews
-        try:
-            google_query = f'"{vendor_name}" reviews {location}'.strip()
-            logger.info(f"[REVIEW TELEMETRY] Google query: {google_query}")
-            google_results = await search_service.search(search_term=google_query, num_results=5)
-
-            raw_google = google_results.get("search_results", [])
-            logger.info(f"[REVIEW TELEMETRY] Google raw results count: {len(raw_google)}")
-            for idx, r in enumerate(raw_google[:3]):
-                logger.info(f"[REVIEW TELEMETRY] Google result {idx}: title={getattr(r, 'title', 'N/A')}, snippet_len={len(getattr(r, 'snippet', '') or '')}")
-
-            google_snippets = "\n".join(
-                f"- {r.snippet}" for r in raw_google[:3] if getattr(r, 'snippet', None)
-            )
-            logger.info(f"[REVIEW TELEMETRY] Google snippets assembled: {len(google_snippets)} chars")
-
-            if google_snippets:
-                response = client.messages.create(
-                    model=MODEL,
-                    max_tokens=256,
-                    messages=[{
-                        "role": "user",
-                        "content": f"""Summarize Google/general reviews for {vendor_name}:
-
-                        {google_snippets}
-
-                        Return JSON:
-                        {{"rating": 4.5, "sentiment": "positive/mixed/negative", "highlights": ["good point"], "concerns": ["issue"]}}
-                        JSON:"""
-                    }]
-                )
-                google_data = _parse_json(response.content[0].text) or {}
-                # Ensure rating is float
-                rating = google_data.get("rating")
-                if rating is not None:
-                    try:
-                        rating = float(rating)
-                    except (ValueError, TypeError):
-                        rating = None
-                logger.info(f"[REVIEW TELEMETRY] Google LLM response: {response.content[0].text[:200]}...")
-                logger.info(f"[REVIEW TELEMETRY] Google parsed data: {google_data}")
-                reviews.append(ReviewSummary(
-                    source="google",
-                    rating=rating,
-                    sentiment=google_data.get("sentiment", "unknown"),
-                    highlights=google_data.get("highlights", []),
-                    concerns=google_data.get("concerns", [])
-                ))
-            else:
-                logger.warning(f"[REVIEW TELEMETRY] Google - NO SNIPPETS for {vendor_name} despite {len(raw_google)} results")
-        except Exception as e:
-            logger.warning(f"[REVIEW TELEMETRY] Google search error for {vendor_name}: {e}")
-
-        # Search Reddit for mentions
-        try:
-            reddit_query = f'site:reddit.com "{vendor_name}"'
-            reddit_results = await search_service.search(search_term=reddit_query, num_results=5)
-
-            reddit_snippets = "\n".join(
-                f"- {r.snippet}" for r in reddit_results.get("search_results", [])[:3]
-            )
-
-            if reddit_snippets:
-                response = client.messages.create(
-                    model=MODEL,
-                    max_tokens=256,
-                    messages=[{
-                        "role": "user",
-                        "content": f"""Summarize Reddit mentions for {vendor_name}:
-
-                        {reddit_snippets}
-
-                        Return JSON:
-                        {{"sentiment": "positive/mixed/negative", "highlights": ["good point"], "concerns": ["issue"]}}
-                        JSON:"""
-                    }]
-                )
-                reddit_data = _parse_json(response.content[0].text) or {}
-                reviews.append(ReviewSummary(
-                    source="reddit",
-                    sentiment=reddit_data.get("sentiment", "unknown"),
-                    highlights=reddit_data.get("highlights", []),
-                    concerns=reddit_data.get("concerns", [])
-                ))
-        except Exception as e:
-            logger.warning(f"Reddit search error for {vendor_name}: {e}")
+            logger.warning(f"[REVIEW AGENT] Error collecting reviews for {vendor_name}: {e}")
 
         # Convert ReviewSummary to dicts for JSON serialization
         vendor["reviews"] = [asdict(r) for r in reviews]
@@ -793,10 +733,14 @@ async def find_reviews(context: WorkflowContext) -> AsyncGenerator[Union[StepPro
             else:
                 vendor["overall_sentiment"] = "mixed"
 
-        # Calculate overall rating
+        # Calculate overall rating from available ratings
         ratings = [r.rating for r in reviews if r.rating is not None]
         if ratings:
             vendor["overall_rating"] = round(sum(ratings) / len(ratings), 1)
+
+        # Calculate total review count
+        total_reviews = sum(r.review_count for r in reviews if r.review_count)
+        vendor["total_review_count"] = total_reviews
 
         reviewed_vendors.append(vendor)
 
@@ -811,17 +755,22 @@ async def find_reviews(context: WorkflowContext) -> AsyncGenerator[Union[StepPro
         if v.get('overall_sentiment'):
             emoji = {"positive": "👍", "mixed": "😐", "negative": "👎"}.get(v['overall_sentiment'], "")
             display += f" {emoji}"
+        if v.get('total_review_count'):
+            display += f" - {v['total_review_count']} total reviews"
         display += "\n"
 
         for review in v.get('reviews', []):
             display += f"\n**{review['source'].title()}:**"
             if review.get('rating'):
                 display += f" {review['rating']}/5"
-            display += f" ({review.get('sentiment', 'unknown')})\n"
+            if review.get('review_count'):
+                display += f" ({review['review_count']} reviews)"
+            display += f" - {review.get('sentiment', 'unknown')}\n"
+
             if review.get('highlights'):
-                display += f"  + {', '.join(review['highlights'][:2])}\n"
+                display += f"  + {review['highlights'][0][:80]}...\n" if review['highlights'] else ""
             if review.get('concerns'):
-                display += f"  - {', '.join(review['concerns'][:2])}\n"
+                display += f"  - {review['concerns'][0][:80]}...\n" if review['concerns'] else ""
 
         display += "\n"
 
