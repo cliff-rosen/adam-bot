@@ -312,10 +312,116 @@ function CheckpointPanel({
             return <MarkdownRenderer content={stepData.answer} />;
         }
 
-        // Fallback: JSON
+        // Vendor list (from vendor_finder workflow)
+        if (stepData.vendors && Array.isArray(stepData.vendors)) {
+            return (
+                <div className="text-gray-900 dark:text-gray-100">
+                    <p className="font-medium text-sm text-gray-700 dark:text-gray-300 mb-3">
+                        {stepData.vendors.length} Vendor{stepData.vendors.length !== 1 ? 's' : ''} Found
+                    </p>
+                    <div className="space-y-3">
+                        {stepData.vendors.map((vendor: any) => (
+                            <div
+                                key={vendor.id || vendor.name}
+                                className="p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
+                            >
+                                <div className="flex items-start justify-between gap-2">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-medium text-gray-900 dark:text-white">
+                                            {vendor.name}
+                                            {vendor.overall_rating && (
+                                                <span className="ml-2 text-sm text-amber-600 dark:text-amber-400">
+                                                    {vendor.overall_rating}/5
+                                                </span>
+                                            )}
+                                            {vendor.overall_sentiment && (
+                                                <span className="ml-1">
+                                                    {vendor.overall_sentiment === 'positive' ? '👍' :
+                                                     vendor.overall_sentiment === 'negative' ? '👎' :
+                                                     vendor.overall_sentiment === 'mixed' ? '😐' : ''}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {vendor.description && (
+                                            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                                                {vendor.description}
+                                            </p>
+                                        )}
+                                        {vendor.location && (
+                                            <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                                📍 {vendor.location}
+                                            </p>
+                                        )}
+                                        {vendor.website && (
+                                            <a
+                                                href={vendor.website}
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="text-xs text-blue-500 hover:underline mt-1 block truncate"
+                                            >
+                                                {vendor.website}
+                                            </a>
+                                        )}
+                                        {vendor.services && vendor.services.length > 0 && (
+                                            <div className="flex flex-wrap gap-1 mt-2">
+                                                {vendor.services.slice(0, 4).map((service: string, idx: number) => (
+                                                    <span key={idx} className="text-xs px-1.5 py-0.5 bg-gray-200 dark:bg-gray-700 rounded">
+                                                        {service}
+                                                    </span>
+                                                ))}
+                                                {vendor.services.length > 4 && (
+                                                    <span className="text-xs text-gray-500">+{vendor.services.length - 4}</span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {vendor.price_tier && (
+                                            <span className="text-xs text-green-600 dark:text-green-400 mt-1 block">
+                                                {vendor.price_tier}
+                                            </span>
+                                        )}
+                                        {/* Review summaries */}
+                                        {vendor.reviews && vendor.reviews.length > 0 && (
+                                            <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-700">
+                                                <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Reviews:</p>
+                                                <div className="space-y-1">
+                                                    {vendor.reviews.map((review: any, idx: number) => (
+                                                        <div key={idx} className="text-xs">
+                                                            <span className="font-medium capitalize">{review.source}</span>
+                                                            {review.rating && <span className="ml-1">({review.rating}/5)</span>}
+                                                            <span className="ml-1 text-gray-500">
+                                                                {review.sentiment === 'positive' ? '👍' :
+                                                                 review.sentiment === 'negative' ? '👎' : '😐'}
+                                                            </span>
+                                                            {review.highlights && review.highlights.length > 0 && (
+                                                                <span className="ml-2 text-green-600 dark:text-green-400">
+                                                                    +{review.highlights[0]}
+                                                                </span>
+                                                            )}
+                                                            {review.concerns && review.concerns.length > 0 && (
+                                                                <span className="ml-2 text-red-600 dark:text-red-400">
+                                                                    -{review.concerns[0]}
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+        }
+
+        // Fallback: JSON (with truncation for large objects)
+        const jsonString = JSON.stringify(stepData, null, 2);
+        const isTruncated = jsonString.length > 2000;
         return (
             <pre className="text-xs overflow-x-auto text-gray-900 dark:text-gray-100">
-                {JSON.stringify(stepData, null, 2)}
+                {isTruncated ? jsonString.slice(0, 2000) + '\n... (truncated)' : jsonString}
             </pre>
         );
     };
@@ -374,7 +480,7 @@ function CheckpointPanel({
 
             {/* Current output display */}
             {stepData && !isEditing && (
-                <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700">
+                <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-200 dark:border-gray-700 max-h-[60vh] overflow-y-auto">
                     <div className="prose dark:prose-invert prose-sm max-w-none">
                         {renderStepData()}
                     </div>
