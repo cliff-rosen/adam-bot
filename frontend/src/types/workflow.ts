@@ -94,7 +94,7 @@ export interface WorkflowInstanceState {
 
 // Engine event from SSE stream
 export interface WorkflowEvent {
-    event_type: 'step_start' | 'step_complete' | 'checkpoint' | 'error' | 'complete' | 'cancelled';
+    event_type: 'step_start' | 'step_complete' | 'step_progress' | 'checkpoint' | 'error' | 'complete' | 'cancelled';
     instance_id: string;
     node_id?: string;
     node_name?: string;

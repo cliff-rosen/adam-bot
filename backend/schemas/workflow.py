@@ -36,6 +36,14 @@ class WorkflowStatus(str, Enum):
 
 
 @dataclass
+class StepProgress:
+    """Progress update during step execution."""
+    message: str
+    progress: Optional[float] = None  # 0.0 to 1.0
+    details: Optional[Dict[str, Any]] = None
+
+
+@dataclass
 class StepOutput:
     """Output from a step execution."""
     success: bool

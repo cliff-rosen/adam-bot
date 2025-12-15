@@ -24,6 +24,7 @@ from schemas.workflow import (
     StepNode,
     StepState,
     StepOutput,
+    StepProgress,
     CheckpointAction,
 )
 from .registry import workflow_registry
@@ -222,6 +223,17 @@ class WorkflowEngine:
             node_state.status = "completed"
             node_state.completed_at = datetime.utcnow()
 
+        self._persist(instance)
+
+        # Emit checkpoint completion event
+        yield EngineEvent(
+            event_type="step_complete",
+            instance_id=instance_id,
+            node_id=current_node.id,
+            node_name=current_node.name,
+            data={"action": action.value}
+        )
+
         # Find next node by evaluating edges
         next_node_id = self._get_next_node(instance.context.graph, current_node.id, instance.context)
 
@@ -369,7 +381,14 @@ class WorkflowEngine:
         node: StepNode,
         node_state: StepState
     ) -> AsyncGenerator[EngineEvent, None]:
-        """Execute an execute-type node."""
+        """
+        Execute an execute-type node.
+
+        Step functions can be either:
+        - Regular async functions: async def step(ctx) -> StepOutput
+        - Async generators: async def step(ctx) -> AsyncGenerator[StepProgress | StepOutput, None]
+          (yield StepProgress for updates, yield StepOutput at the end)
+        """
         node_state.status = "running"
         node_state.started_at = datetime.utcnow()
         node_state.execution_count += 1
@@ -387,7 +406,37 @@ class WorkflowEngine:
                 raise ValueError(f"Node {node.id} has no execute function")
 
             # Execute the node function
-            output = await node.execute_fn(instance.context)
+            result = node.execute_fn(instance.context)
+
+            # Check if result is an async generator (yields progress)
+            if hasattr(result, '__anext__'):
+                # It's an async generator - iterate through progress events
+                output = None
+                async for item in result:
+                    if isinstance(item, StepProgress):
+                        # Emit progress event
+                        yield EngineEvent(
+                            event_type="step_progress",
+                            instance_id=instance.id,
+                            node_id=node.id,
+                            node_name=node.name,
+                            data={
+                                "message": item.message,
+                                "progress": item.progress,
+                                "details": item.details
+                            }
+                        )
+                    elif isinstance(item, StepOutput):
+                        output = item
+                        break
+                    else:
+                        logger.warning(f"Unknown item type from step {node.id}: {type(item)}")
+
+                if output is None:
+                    raise ValueError(f"Step {node.id} generator did not yield a StepOutput")
+            else:
+                # Regular async function - await it
+                output = await result
 
             if output.success:
                 node_state.status = "completed"

@@ -279,23 +279,39 @@ function CheckpointPanel({
 
     // When loading, show a processing state instead of the checkpoint content
     if (isLoading) {
-        const stepName = currentEvent?.node_name;
         const eventType = currentEvent?.event_type;
-        const statusText = eventType === 'step_start' && stepName ? `Running: ${stepName}` :
-                          eventType === 'step_complete' && stepName ? `Completed: ${stepName}` :
-                          'Running next step';
+        const stepName = currentEvent?.node_name;
+        const progressMessage = currentEvent?.data?.message;
+        const progress = currentEvent?.data?.progress;
+
+        const statusText = eventType === 'step_progress' && progressMessage
+            ? progressMessage
+            : eventType === 'step_start' && stepName
+                ? `Running: ${stepName}`
+                : eventType === 'step_complete' && stepName
+                    ? `Completed: ${stepName}`
+                    : 'Running next step';
 
         return (
             <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
                 <div className="flex items-center gap-3">
                     <ArrowPathIcon className="h-5 w-5 text-blue-600 dark:text-blue-400 animate-spin flex-shrink-0" />
-                    <div>
+                    <div className="flex-1">
                         <h3 className="font-semibold text-gray-900 dark:text-white">
                             Processing...
                         </h3>
                         <p className="text-sm text-gray-600 dark:text-gray-400">
                             {statusText}
                         </p>
+                        {/* Progress bar if available */}
+                        {eventType === 'step_progress' && progress != null && (
+                            <div className="mt-2 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                <div
+                                    className="h-full bg-blue-500 transition-all duration-300"
+                                    style={{ width: `${Math.round(progress * 100)}%` }}
+                                />
+                            </div>
+                        )}
                     </div>
                 </div>
             </div>
@@ -530,15 +546,26 @@ export default function WorkflowExecutionView({
                 <div className="mb-6 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl p-4">
                     <div className="flex items-center gap-3">
                         <ArrowPathIcon className="h-5 w-5 text-blue-600 dark:text-blue-400 animate-spin" />
-                        <div>
+                        <div className="flex-1">
                             <div className="font-medium text-gray-900 dark:text-white">Processing...</div>
                             <div className="text-sm text-gray-500 dark:text-gray-400">
-                                {currentEvent?.event_type === 'step_start' && currentEvent?.node_name
-                                    ? `Running: ${currentEvent.node_name}`
-                                    : currentEvent?.event_type === 'step_complete' && currentEvent?.node_name
-                                        ? `Completed: ${currentEvent.node_name}`
-                                        : instanceState.current_node?.name || 'Running workflow'}
+                                {currentEvent?.event_type === 'step_progress' && currentEvent?.data?.message
+                                    ? currentEvent.data.message
+                                    : currentEvent?.event_type === 'step_start' && currentEvent?.node_name
+                                        ? `Running: ${currentEvent.node_name}`
+                                        : currentEvent?.event_type === 'step_complete' && currentEvent?.node_name
+                                            ? `Completed: ${currentEvent.node_name}`
+                                            : instanceState.current_node?.name || 'Running workflow'}
                             </div>
+                            {/* Progress bar if available */}
+                            {currentEvent?.event_type === 'step_progress' && currentEvent?.data?.progress != null && (
+                                <div className="mt-2 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                                    <div
+                                        className="h-full bg-blue-500 transition-all duration-300"
+                                        style={{ width: `${Math.round(currentEvent.data.progress * 100)}%` }}
+                                    />
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>

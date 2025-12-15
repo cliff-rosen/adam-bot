@@ -18,7 +18,9 @@ Graph structure:
 """
 
 import logging
-from typing import Any, Dict
+import json
+import asyncio
+from typing import Any, Dict, List, AsyncGenerator, Union, Optional
 import anthropic
 
 from schemas.workflow import (
@@ -26,6 +28,7 @@ from schemas.workflow import (
     StepNode,
     Edge,
     StepOutput,
+    StepProgress,
     CheckpointConfig,
     CheckpointAction,
     WorkflowContext,
@@ -36,12 +39,38 @@ logger = logging.getLogger(__name__)
 # LLM client - initialized lazily
 _client = None
 
+# Research constants
+RESEARCH_MODEL = "claude-sonnet-4-20250514"
+MAX_URLS_PER_ITERATION = 3
+MAX_SEARCH_RESULTS = 8
+
 
 def get_llm_client():
     global _client
     if _client is None:
         _client = anthropic.Anthropic()
     return _client
+
+
+def _parse_llm_json(text: str) -> Optional[Any]:
+    """Parse JSON from LLM response, handling markdown code blocks."""
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.split("\n")
+        start_idx = 1
+        end_idx = len(lines)
+        for i, line in enumerate(lines[1:], 1):
+            if line.strip() == "```":
+                end_idx = i
+                break
+        text = "\n".join(lines[start_idx:end_idx]).strip()
+        if text.startswith("json"):
+            text = text[4:].strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError as e:
+        logger.warning(f"JSON parse error: {e}")
+        return None
 
 
 # =============================================================================
@@ -212,119 +241,359 @@ async def build_checklist(context: WorkflowContext) -> StepOutput:
         )
 
 
-async def run_retrieval_iteration(context: WorkflowContext) -> StepOutput:
+async def run_retrieval_iteration(
+    context: WorkflowContext
+) -> AsyncGenerator[Union[StepProgress, StepOutput], None]:
     """
     Step 3: Run one iteration of the retrieval loop.
-    Searches for information and updates the checklist with findings.
+
+    Uses actual search and web retrieval services:
+    1. Generate search queries for pending checklist items
+    2. Execute real web searches
+    3. Evaluate and select promising URLs
+    4. Fetch actual web pages
+    5. Extract relevant information using LLM
+    6. Update checklist with findings
+
+    Yields progress updates during execution, then yields the final StepOutput.
     """
+    from services.search_service import SearchService, SearchQuotaExceededError, SearchAPIError
+    from services.web_retrieval_service import WebRetrievalService
+
     # Get checklist data from either build_checklist or previous retrieval
     checklist_data = context.get_step_output("run_retrieval") or context.get_step_output("build_checklist")
     if not checklist_data:
-        return StepOutput(success=False, error="No checklist data available")
+        yield StepOutput(success=False, error="No checklist data available")
+        return
 
     # Get or initialize retrieval state
     iteration = context.get_variable("retrieval_iteration", 0) + 1
     context.set_variable("retrieval_iteration", iteration)
 
+    # Track queries we've used to avoid repeats
+    used_queries = context.get_variable("used_queries", [])
+    all_sources = context.get_variable("all_sources", [])
+
     items = checklist_data.get("items", [])
     refined_question = checklist_data.get("refined_question", "")
 
+    # Calculate progress
+    total_items = len(items)
+    completed_items = len([item for item in items if item.get("status") == "complete"])
+
     # Find pending items to research
-    pending_items = [item for item in items if item.get("status") == "pending"]
+    pending_items = [item for item in items if item.get("status") in ["pending", "partial"]]
 
     if not pending_items:
         # All items complete - set flag for edge condition
         context.set_variable("retrieval_complete", True)
-        return StepOutput(
+        yield StepOutput(
             success=True,
             data={
                 **checklist_data,
                 "retrieval_complete": True,
-                "total_iterations": iteration
+                "total_iterations": iteration,
+                "sources": all_sources
             },
-            display_title=f"Retrieval Complete",
-            display_content=f"All checklist items have been addressed after {iteration} iterations.",
+            display_title="Retrieval Complete",
+            display_content=f"All checklist items have been addressed after {iteration} iterations.\n\n**Sources consulted:** {len(all_sources)}",
             content_type="markdown"
         )
+        return
+
+    # Focus on top 3 pending items
+    target_items = pending_items[:3]
+
+    yield StepProgress(
+        message=f"Iteration {iteration}: Generating search queries...",
+        progress=completed_items / total_items if total_items > 0 else 0,
+        details={"iteration": iteration, "pending_items": len(pending_items)}
+    )
 
     try:
-        # For now, simulate retrieval with LLM
-        # In production, this would use actual search tools
         client = get_llm_client()
 
-        target_item = pending_items[0]  # Focus on highest priority pending
+        # Step 1: Generate search queries
+        unfilled_text = "\n".join(f"- {item['description']}" for item in target_items)
+        used_queries_text = "\n".join(f"- {q}" for q in used_queries[-10:]) or "None yet"
 
-        prompt = f"""You are researching to answer a question. Focus on finding information for one specific aspect.
+        query_response = client.messages.create(
+            model=RESEARCH_MODEL,
+            max_tokens=512,
+            temperature=0.5,
+            messages=[{
+                "role": "user",
+                "content": f"""Generate 2-3 search queries to find information for these research needs:
 
-        Research Question: "{refined_question}"
+                {unfilled_text}
 
-        Current focus: "{target_item['description']}"
+                Research question context: {refined_question}
 
-        Provide findings that address this aspect. Include:
-        1. Key facts or information found
-        2. Any sources or references (simulate for now)
-        3. Confidence level in the findings
+                Previously used queries (avoid repeating):
+                {used_queries_text}
 
-        Respond in JSON format:
-        {{
-            "findings": [
-                {{
-                    "content": "The finding or fact",
-                    "source": "Source reference",
-                    "confidence": "high|medium|low"
-                }}
-            ],
-            "status": "complete|partial|pending",
-            "summary": "Brief summary of what was found"
-        }}"""
-
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2048,
-            messages=[{"role": "user", "content": prompt}]
+                Return ONLY a JSON array of search query strings. Be specific and varied.
+                JSON array:"""
+            }]
         )
 
-        import json
-        content = response.content[0].text
+        queries = _parse_llm_json(query_response.content[0].text)
+        if not queries or not isinstance(queries, list):
+            queries = [refined_question]  # Fallback
 
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
+        # Filter out already-used queries
+        new_queries = [q for q in queries if q not in used_queries][:3]
+        used_queries.extend(new_queries)
+        context.set_variable("used_queries", used_queries)
 
-        result = json.loads(content.strip())
-
-        # Update the target item with findings
-        for item in items:
-            if item["id"] == target_item["id"]:
-                item["findings"].extend(result.get("findings", []))
-                item["status"] = result.get("status", "partial")
-                break
-
-        # Check completion and set flag for edge condition
-        all_complete = all(item.get("status") == "complete" for item in items)
-        context.set_variable("retrieval_complete", all_complete)
-
-        # Check max iterations
-        max_iterations = context.get_variable("max_iterations", 10)
-        if iteration >= max_iterations:
+        if not new_queries:
+            yield StepProgress(message="No new queries to try", progress=completed_items / total_items)
             context.set_variable("retrieval_complete", True)
+            yield StepOutput(
+                success=True,
+                data={**checklist_data, "retrieval_complete": True, "sources": all_sources},
+                display_title="Retrieval Complete",
+                display_content="No more search queries to try."
+            )
+            return
 
+        yield StepProgress(
+            message=f"Executing {len(new_queries)} web searches...",
+            progress=completed_items / total_items if total_items > 0 else 0.1,
+            details={"queries": new_queries}
+        )
+
+        # Step 2: Execute real web searches
+        search_service = SearchService()
+        if not search_service.initialized:
+            search_service.initialize()
+
+        all_results = []
+        for query in new_queries:
+            yield StepProgress(
+                message=f"Searching: \"{query[:50]}...\"",
+                progress=completed_items / total_items if total_items > 0 else 0.15
+            )
+            try:
+                result = await search_service.search(search_term=query, num_results=MAX_SEARCH_RESULTS)
+                for item in result.get("search_results", []):
+                    all_results.append({
+                        "title": item.title,
+                        "url": item.url,
+                        "snippet": item.snippet,
+                        "query": query
+                    })
+            except SearchQuotaExceededError as e:
+                logger.warning(f"Search quota exceeded: {e}")
+                break
+            except SearchAPIError as e:
+                logger.error(f"Search API error: {e}")
+            except Exception as e:
+                logger.error(f"Search error: {e}")
+
+        # Dedupe by URL
+        seen_urls = set(all_sources)  # Skip already-fetched URLs
+        deduped_results = []
+        for r in all_results:
+            if r["url"] not in seen_urls:
+                seen_urls.add(r["url"])
+                deduped_results.append(r)
+
+        if not deduped_results:
+            yield StepProgress(message="No new search results found", progress=0.5)
+            # Mark iteration done but continue if more iterations allowed
+            max_iterations = context.get_variable("max_iterations", 5)
+            if iteration >= max_iterations:
+                context.set_variable("retrieval_complete", True)
+            yield StepOutput(
+                success=True,
+                data={**checklist_data, "current_iteration": iteration, "sources": all_sources},
+                display_title=f"Iteration {iteration}",
+                display_content="No new search results found this iteration."
+            )
+            return
+
+        yield StepProgress(
+            message=f"Found {len(deduped_results)} search results, evaluating...",
+            progress=0.3
+        )
+
+        # Step 3: Evaluate which URLs to fetch
+        results_text = ""
+        for i, r in enumerate(deduped_results[:15]):
+            results_text += f"{i+1}. {r['title']}\n   URL: {r['url']}\n   {r['snippet']}\n\n"
+
+        eval_response = client.messages.create(
+            model=RESEARCH_MODEL,
+            max_tokens=256,
+            temperature=0.2,
+            messages=[{
+                "role": "user",
+                "content": f"""Which search results are most likely to contain useful information?
+
+                Information needed:
+                {unfilled_text}
+
+                Search results:
+                {results_text}
+
+                Return ONLY a JSON array of result numbers (1-indexed) to fetch. Pick up to {MAX_URLS_PER_ITERATION} most promising.
+                Example: [1, 3, 5]
+                JSON array:"""
+            }]
+        )
+
+        selected_indices = _parse_llm_json(eval_response.content[0].text)
+        urls_to_fetch = []
+        if selected_indices and isinstance(selected_indices, list):
+            for idx in selected_indices[:MAX_URLS_PER_ITERATION]:
+                try:
+                    if isinstance(idx, int) and 1 <= idx <= len(deduped_results):
+                        urls_to_fetch.append(deduped_results[idx - 1]["url"])
+                except (TypeError, ValueError):
+                    continue
+
+        if not urls_to_fetch:
+            # Fallback: take first few results
+            urls_to_fetch = [r["url"] for r in deduped_results[:MAX_URLS_PER_ITERATION]]
+
+        yield StepProgress(
+            message=f"Fetching {len(urls_to_fetch)} web pages...",
+            progress=0.4,
+            details={"urls": urls_to_fetch}
+        )
+
+        # Step 4: Fetch actual web pages
+        web_service = WebRetrievalService()
+        pages = []
+        for url in urls_to_fetch:
+            yield StepProgress(
+                message=f"Fetching: {url[:60]}...",
+                progress=0.5
+            )
+            try:
+                result = await web_service.retrieve_webpage(url=url, extract_text_only=True)
+                webpage = result["webpage"]
+                pages.append({
+                    "url": url,
+                    "title": webpage.title,
+                    "content": webpage.content[:6000]  # Limit per page
+                })
+                all_sources.append(url)
+            except Exception as e:
+                logger.error(f"Fetch error for {url}: {e}")
+
+        context.set_variable("all_sources", all_sources)
+
+        if not pages:
+            yield StepProgress(message="Failed to fetch any pages", progress=0.6)
+            max_iterations = context.get_variable("max_iterations", 5)
+            if iteration >= max_iterations:
+                context.set_variable("retrieval_complete", True)
+            yield StepOutput(
+                success=True,
+                data={**checklist_data, "current_iteration": iteration, "sources": all_sources},
+                display_title=f"Iteration {iteration}",
+                display_content="Could not fetch any web pages this iteration."
+            )
+            return
+
+        yield StepProgress(
+            message=f"Extracting information from {len(pages)} pages...",
+            progress=0.7,
+            details={"pages_fetched": len(pages)}
+        )
+
+        # Step 5: Extract relevant information
+        questions_text = "\n".join(f"{i+1}. {item['description']}" for i, item in enumerate(target_items))
+        pages_text = ""
+        for p in pages:
+            pages_text += f"=== {p['title']} ({p['url']}) ===\n{p['content']}\n\n"
+
+        extract_response = client.messages.create(
+            model=RESEARCH_MODEL,
+            max_tokens=2048,
+            temperature=0.2,
+            messages=[{
+                "role": "user",
+                "content": f"""Extract information from these pages that answers our research questions.
+
+Questions we need to answer:
+{questions_text}
+
+Page contents:
+{pages_text}
+
+For each question, extract relevant facts found. Return JSON:
+{{
+  "extractions": [
+    {{"question_index": 1, "findings": ["fact 1", "fact 2"], "complete": true/false}},
+    ...
+  ]
+}}
+
+Only include questions where you found relevant information.
+JSON:"""
+            }]
+        )
+
+        extractions = _parse_llm_json(extract_response.content[0].text)
+
+        # Step 6: Update checklist with findings
+        if extractions and isinstance(extractions, dict):
+            for ext in extractions.get("extractions", []):
+                idx = ext.get("question_index", 0) - 1
+                if 0 <= idx < len(target_items):
+                    target_id = target_items[idx]["id"]
+                    # Find and update the actual item in items list
+                    for item in items:
+                        if item["id"] == target_id:
+                            new_findings = ext.get("findings", [])
+                            # Add findings with source info
+                            for finding in new_findings:
+                                item["findings"].append({
+                                    "content": finding,
+                                    "source": pages[0]["url"] if pages else "unknown",
+                                    "confidence": "medium"
+                                })
+                            if ext.get("complete", False):
+                                item["status"] = "complete"
+                            elif item["findings"]:
+                                item["status"] = "partial"
+                            break
+
+        # Calculate new progress
+        new_completed = len([item for item in items if item.get("status") == "complete"])
+        all_complete = all(item.get("status") == "complete" for item in items)
+
+        yield StepProgress(
+            message=f"Updated checklist: {new_completed}/{total_items} items complete",
+            progress=new_completed / total_items if total_items > 0 else 0.9
+        )
+
+        # Check completion
+        max_iterations = context.get_variable("max_iterations", 5)
+        if all_complete or iteration >= max_iterations:
+            context.set_variable("retrieval_complete", True)
+        else:
+            context.set_variable("retrieval_complete", False)
+
+        # Build display content
         display_content = f"## Retrieval Iteration {iteration}\n\n"
-        display_content += f"**Researching:** {target_item['description']}\n\n"
-        display_content += f"**Summary:** {result.get('summary', 'No summary')}\n\n"
-        display_content += "### Findings:\n"
-        for finding in result.get("findings", []):
-            display_content += f"- {finding.get('content', '')} _{finding.get('source', '')}_\n"
+        display_content += f"**Queries used:** {', '.join(new_queries)}\n\n"
+        display_content += f"**Pages fetched:** {len(pages)}\n"
+        for p in pages:
+            display_content += f"- [{p['title']}]({p['url']})\n"
+        display_content += f"\n**Checklist progress:** {new_completed}/{total_items} complete\n"
 
-        return StepOutput(
+        yield StepOutput(
             success=True,
             data={
                 **checklist_data,
                 "items": items,
                 "retrieval_complete": all_complete or iteration >= max_iterations,
                 "current_iteration": iteration,
-                "last_researched": target_item["id"]
+                "sources": all_sources
             },
             display_title=f"Retrieval Iteration {iteration}",
             display_content=display_content,
@@ -333,7 +602,7 @@ async def run_retrieval_iteration(context: WorkflowContext) -> StepOutput:
 
     except Exception as e:
         logger.exception("Error in retrieval iteration")
-        return StepOutput(
+        yield StepOutput(
             success=False,
             error=f"Failed retrieval iteration: {str(e)}"
         )
