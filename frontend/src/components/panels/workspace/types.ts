@@ -5,7 +5,8 @@
 import {
     DocumentTextIcon, TableCellsIcon, CodeBracketIcon,
     ClipboardDocumentListIcon, PlayIcon, ArrowPathIcon, CheckCircleIcon,
-    CpuChipIcon, PencilSquareIcon, Squares2X2Icon, BeakerIcon, StarIcon
+    CpuChipIcon, PencilSquareIcon, Squares2X2Icon, BeakerIcon, StarIcon,
+    MagnifyingGlassCircleIcon
 } from '@heroicons/react/24/solid';
 import { ComponentType } from 'react';
 
@@ -121,6 +122,14 @@ export const payloadTypeConfig: Record<string, PayloadTypeConfig> = {
         bg: 'bg-yellow-50 dark:bg-yellow-900/20',
         border: 'border-yellow-200 dark:border-yellow-800',
         label: 'Review Collection',
+        editable: false
+    },
+    entity_verification: {
+        icon: MagnifyingGlassCircleIcon,
+        color: 'text-indigo-500',
+        bg: 'bg-indigo-50 dark:bg-indigo-900/20',
+        border: 'border-indigo-200 dark:border-indigo-800',
+        label: 'Entity Verification',
         editable: false
     }
 };

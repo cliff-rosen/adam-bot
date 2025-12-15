@@ -320,7 +320,7 @@ def verify_entity(
         logger.info(f"Entity verification iteration {iteration}/{MAX_ITERATIONS}")
 
         # === STEP 1: Search ===
-        yield {"stage": "searching", "message": f"Search [{iteration}]: {search_query[:50]}...", "iteration": iteration}
+        yield {"stage": "searching", "message": f"Searching {source.upper()} [{iteration}]", "iteration": iteration}
 
         step_start = time.time()
         search_results = _do_search(search_query, db, user_id, context)
@@ -335,7 +335,7 @@ def verify_entity(
         ))
 
         if not search_results:
-            yield {"stage": "no_results", "message": "No search results", "iteration": iteration}
+            yield {"stage": "no_results", "message": f"No {source.upper()} results found, refining search", "iteration": iteration}
             # LLM might suggest different search
             search_query = f'{site_op} {business_name} {location.split(",")[0]}'
             continue
@@ -347,7 +347,7 @@ def verify_entity(
         ])
 
         # === STEP 2: Ask LLM for best guess ===
-        yield {"stage": "analyzing", "message": f"Analyzing {len(search_results)} results", "iteration": iteration}
+        yield {"stage": "analyzing", "message": f"Found {len(search_results)} results, selecting best match", "iteration": iteration}
 
         guess_prompt = GUESS_PROMPT.format(
             business_name=business_name,
@@ -379,7 +379,7 @@ def verify_entity(
         if guess_data.get("decision") == "none_match":
             alt_search = guess_data.get("alternative_search", "")
             if alt_search:
-                yield {"stage": "no_match", "message": f"No match, trying: {alt_search[:40]}...", "iteration": iteration}
+                yield {"stage": "no_match", "message": f"No exact match, trying different search", "iteration": iteration}
                 search_query = f'{site_op} {alt_search}'
                 continue
             else:
@@ -404,12 +404,12 @@ def verify_entity(
         )
 
         if not candidate.url:
-            yield {"stage": "no_url", "message": "Candidate has no URL", "iteration": iteration}
+            yield {"stage": "no_url", "message": "No valid URL found, refining search", "iteration": iteration}
             search_query = f'{site_op} "{business_name}" "{location}"'
             continue
 
         # === STEP 3: Fetch the page ===
-        yield {"stage": "fetching", "message": f"Fetching {candidate.url[:50]}...", "iteration": iteration}
+        yield {"stage": "fetching", "message": f"Loading {source.upper()} page", "iteration": iteration}
 
         step_start = time.time()
         needs_js = _needs_js_rendering(candidate.url)
@@ -425,7 +425,7 @@ def verify_entity(
         ))
 
         if was_blocked:
-            yield {"stage": "blocked", "message": "Page blocked, trying different approach", "iteration": iteration}
+            yield {"stage": "blocked", "message": f"{source.upper()} blocked access, trying alternative", "iteration": iteration}
             # Try fetching a different result from search
             for r in search_results[1:4]:
                 if source in r.url.lower():
@@ -434,7 +434,7 @@ def verify_entity(
             continue
 
         # === STEP 4: Ask LLM to verify ===
-        yield {"stage": "verifying", "message": "Verifying business identity", "iteration": iteration}
+        yield {"stage": "verifying", "message": "Checking if this is the right business", "iteration": iteration}
 
         verify_prompt = VERIFY_PROMPT.format(
             business_name=business_name,
@@ -473,7 +473,7 @@ def verify_entity(
             )
 
             total_duration = int((time.time() - start_time) * 1000)
-            yield {"stage": "confirmed", "message": f"Confirmed: {confirmed_entity.name}", "iteration": iteration}
+            yield {"stage": "confirmed", "message": f"Found: {confirmed_entity.name}", "iteration": iteration}
 
             return VerificationResult(
                 status="confirmed",
@@ -487,7 +487,7 @@ def verify_entity(
         elif decision == "give_up":
             reason = verify_data.get("give_up_reason", "Could not verify")
             total_duration = int((time.time() - start_time) * 1000)
-            yield {"stage": "gave_up", "message": reason, "iteration": iteration}
+            yield {"stage": "gave_up", "message": f"Could not find business on {source.upper()}", "iteration": iteration}
 
             return VerificationResult(
                 status="gave_up",
@@ -501,7 +501,7 @@ def verify_entity(
         else:  # not_it
             next_search = verify_data.get("next_search", "")
             if next_search:
-                yield {"stage": "not_it", "message": f"Wrong business, trying: {next_search[:40]}...", "iteration": iteration}
+                yield {"stage": "not_it", "message": "Wrong business, searching again", "iteration": iteration}
                 search_query = f'{site_op} {next_search}'
             else:
                 # Modify current search
@@ -548,3 +548,162 @@ def verify_entity_sync(
         result = e.value
 
     return result, progress_events
+
+
+# =============================================================================
+# Tool Registration
+# =============================================================================
+
+def _result_to_dict(result: VerificationResult) -> Dict[str, Any]:
+    """Convert VerificationResult to serializable dict."""
+    return {
+        "status": result.status,
+        "entity": {
+            "name": result.entity.name,
+            "url": result.entity.url,
+            "reason": result.entity.reason,
+            "confidence": result.entity.confidence
+        } if result.entity else None,
+        "steps": [
+            {
+                "iteration": s.iteration,
+                "action": s.action,
+                "input": s.input,
+                "output": s.output,
+                "duration_ms": s.duration_ms
+            }
+            for s in result.steps
+        ],
+        "total_duration_ms": result.total_duration_ms,
+        "message": result.message
+    }
+
+
+def execute_entity_verification(
+    params: Dict[str, Any],
+    db,
+    user_id: int,
+    context: Dict[str, Any]
+) -> Generator:
+    """
+    Streaming executor for entity verification tool.
+    """
+    from tools.registry import ToolResult, ToolProgress
+
+    business_name = params.get("business_name", "")
+    location = params.get("location", "")
+    source = params.get("source", "").lower()
+
+    # Validate inputs
+    if not business_name:
+        return ToolResult(text="Error: business_name is required")
+    if not location:
+        return ToolResult(text="Error: location is required")
+    if source not in ("yelp", "google"):
+        return ToolResult(text="Error: source must be 'yelp' or 'google'")
+
+    yield ToolProgress(
+        stage="starting",
+        message=f"Verifying {business_name} on {source.upper()}",
+        data={"business_name": business_name, "location": location, "source": source}
+    )
+
+    # Run verification workflow
+    verification_gen = verify_entity(
+        business_name=business_name,
+        location=location,
+        source=source,
+        db=db,
+        user_id=user_id,
+        context=context
+    )
+
+    # Forward progress
+    result = None
+    try:
+        while True:
+            progress = next(verification_gen)
+            yield ToolProgress(
+                stage=progress.get("stage", "verifying"),
+                message=progress.get("message", "Verifying..."),
+                data={"iteration": progress.get("iteration", 1)}
+            )
+    except StopIteration as e:
+        result = e.value
+
+    # Build result
+    result_dict = _result_to_dict(result)
+
+    if result.status == "confirmed":
+        text_output = f"**Entity Verified**\n\n"
+        text_output += f"- **Name:** {result.entity.name}\n"
+        text_output += f"- **URL:** {result.entity.url}\n"
+        text_output += f"- **Confidence:** {result.entity.confidence}\n"
+        text_output += f"- **Reason:** {result.entity.reason}\n"
+        success_msg = f"Verified: {result.entity.name}"
+    else:
+        text_output = f"**Entity Not Found**\n\n"
+        text_output += f"- **Status:** {result.status}\n"
+        text_output += f"- **Message:** {result.message}\n"
+        text_output += f"- **Attempts:** {len(result.steps)} steps across {result.steps[-1].iteration if result.steps else 0} iterations\n"
+        success_msg = result.message
+
+    yield ToolProgress(
+        stage="complete",
+        message=success_msg,
+        data={"status": result.status}
+    )
+
+    return ToolResult(
+        text=text_output,
+        data=result_dict,
+        workspace_payload={
+            "type": "entity_verification",
+            "data": result_dict
+        }
+    )
+
+
+def register_entity_verification_tool():
+    """Register the entity verification tool."""
+    from tools.registry import ToolConfig, register_tool
+
+    tool = ToolConfig(
+        name="verify_entity",
+        description="""Verify a business entity exists on a platform (Yelp or Google).
+
+This tool uses an orchestrated workflow to:
+1. Search for the business
+2. Analyze results to find best match
+3. Fetch the candidate page
+4. Verify it's the correct business
+5. Loop until confirmed or give up
+
+Use this when you need to confirm a specific business exists on a platform
+before collecting reviews or other data.""",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "business_name": {
+                    "type": "string",
+                    "description": "Name of the business to verify"
+                },
+                "location": {
+                    "type": "string",
+                    "description": "City and state (e.g., 'Cambridge, MA')"
+                },
+                "source": {
+                    "type": "string",
+                    "enum": ["yelp", "google"],
+                    "description": "Platform to verify on"
+                }
+            },
+            "required": ["business_name", "location", "source"]
+        },
+        executor=execute_entity_verification,
+        category="research",
+        streaming=True
+    )
+
+    register_tool(tool)
+    logger.info("Registered verify_entity tool")
