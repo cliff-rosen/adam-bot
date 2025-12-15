@@ -197,15 +197,15 @@ async def define_criteria(context: WorkflowContext) -> StepOutput:
         **Location:** {data.get('location', 'Any')} ({data.get('radius', 'any')})
 
         **Must Have:**
-        {chr(10).join(f'- {r}' for r in data.get('must_have', [])) or '- None specified'}
+        {chr(10).join(f'- {r}' for r in (data.get('must_have') or [])) or '- None specified'}
 
         **Nice to Have:**
-        {chr(10).join(f'- {r}' for r in data.get('nice_to_have', [])) or '- None specified'}
+        {chr(10).join(f'- {r}' for r in (data.get('nice_to_have') or [])) or '- None specified'}
 
         **Budget:** {data.get('budget_hint', 'Not specified')}
 
         **Search Queries to Use:**
-        {chr(10).join(f'- {q}' for q in data.get('search_queries', []))}
+        {chr(10).join(f'- {q}' for q in (data.get('search_queries') or []))}
         """
 
         return StepOutput(
@@ -841,24 +841,27 @@ async def analyze_and_recommend(context: WorkflowContext) -> StepOutput:
         # Build vendor summaries for LLM
         vendor_summaries = []
         for v in vendors:
+            services = v.get('services') or []
             summary = f"""
             **{v['name']}**
             - Location: {v.get('location', 'Unknown')}
-            - Services: {', '.join(v.get('services', [])) or 'Not specified'}
+            - Services: {', '.join(services) if services else 'Not specified'}
             - Overall Rating: {v.get('overall_rating', 'No rating')}/5
             - Overall Sentiment: {v.get('overall_sentiment', 'Unknown')}
             - Price Tier: {v.get('price_tier', 'Unknown')}
             """
             # Add review highlights
-            for review in v.get('reviews', []):
-                summary += f"- {review['source'].title()}: {review.get('sentiment', 'unknown')}"
+            for review in v.get('reviews') or []:
+                summary += f"- {review.get('source', 'unknown').title()}: {review.get('sentiment', 'unknown')}"
                 if review.get('rating'):
                     summary += f" ({review['rating']}/5)"
                 summary += "\n"
-                if review.get('highlights'):
-                    summary += f"  Positives: {', '.join(review['highlights'][:3])}\n"
-                if review.get('concerns'):
-                    summary += f"  Concerns: {', '.join(review['concerns'][:3])}\n"
+                highlights = review.get('highlights') or []
+                concerns = review.get('concerns') or []
+                if highlights:
+                    summary += f"  Positives: {', '.join(highlights[:3])}\n"
+                if concerns:
+                    summary += f"  Concerns: {', '.join(concerns[:3])}\n"
 
             vendor_summaries.append(summary)
 
@@ -875,8 +878,8 @@ async def analyze_and_recommend(context: WorkflowContext) -> StepOutput:
                 **Search Context:**
                 - Looking for: {criteria.get('vendor_type', original_query)}
                 - Location: {criteria.get('location', 'Not specified')}
-                - Must have: {', '.join(criteria.get('must_have', [])) or 'None specified'}
-                - Nice to have: {', '.join(criteria.get('nice_to_have', [])) or 'None specified'}
+                - Must have: {', '.join(criteria.get('must_have') or []) or 'None specified'}
+                - Nice to have: {', '.join(criteria.get('nice_to_have') or []) or 'None specified'}
 
                 **Vendors Found ({len(vendors)}):**
                 {vendors_text}
