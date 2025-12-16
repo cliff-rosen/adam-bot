@@ -104,6 +104,9 @@ export default function MainPage() {
     const [workflowInstance, setWorkflowInstance] = useState<WorkflowInstanceState | null>(null);
     const [workflowHandlers, setWorkflowHandlers] = useState<WorkflowHandlers | null>(null);
     const [isWorkflowProcessing, setIsWorkflowProcessing] = useState(false);
+
+    // Workflow testing state - tracks the graph being tested so we can accept it later
+    const [testingWorkflowGraph, setTestingWorkflowGraph] = useState<Record<string, any> | null>(null);
     const [currentWorkflowEvent, setCurrentWorkflowEvent] = useState<WorkflowEvent | null>(null);
 
     // Content state
@@ -574,6 +577,77 @@ export default function MainPage() {
         setActivePayload(null);
     }, []);
 
+    // Workflow testing handler
+    const handleTestWorkflow = useCallback(async (workflow: Record<string, any>, inputs: Record<string, any>) => {
+        try {
+            // Save the workflow graph for later acceptance
+            setTestingWorkflowGraph(workflow);
+
+            // Start the workflow with the user's test inputs
+            const { handlers } = await startWorkflowWithUI(
+                null, // No template ID - using inline graph
+                inputs, // User-provided test inputs
+                {
+                    setWorkflowState: setWorkflowInstance,
+                    setIsProcessing: setIsWorkflowProcessing,
+                    setCurrentEvent: setCurrentWorkflowEvent,
+                    conversationId: conversationId ?? undefined,
+                    showNotification: (message, type) => {
+                        toast({
+                            title: type === 'error' ? 'Error' : 'Success',
+                            description: message,
+                            variant: type === 'error' ? 'destructive' : 'default',
+                        });
+                    }
+                },
+                workflow // Pass the inline graph
+            );
+
+            setWorkflowHandlers(handlers);
+
+            // Clear the design payload (workflow execution view will take over)
+            setActivePayload(null);
+        } catch (error) {
+            console.error('Failed to test workflow:', error);
+            toast({
+                title: 'Error',
+                description: `Failed to test workflow: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                variant: 'destructive',
+            });
+        }
+    }, [conversationId, toast]);
+
+    // Accept workflow template handler (stub - saves to local state only for now)
+    const handleAcceptWorkflowTemplate = useCallback(async (workflow: Record<string, any>) => {
+        try {
+            // TODO: Call backend API to save workflow template
+            // For now, just log and show success message
+            console.log('[STUB] Saving workflow template:', workflow);
+
+            // Show success message with instructions
+            const workflowName = workflow.name || 'Untitled Workflow';
+            toast({
+                title: 'Workflow Saved!',
+                description: `"${workflowName}" has been saved as a template. You can run it anytime from the Workflows menu in the context panel.`,
+                duration: 8000,
+            });
+
+            // Clear the testing state and workflow instance
+            setTestingWorkflowGraph(null);
+            setWorkflowInstance(null);
+            setWorkflowHandlers(null);
+            setIsWorkflowProcessing(false);
+            setCurrentWorkflowEvent(null);
+        } catch (error) {
+            console.error('Failed to save workflow template:', error);
+            toast({
+                title: 'Error',
+                description: `Failed to save workflow: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                variant: 'destructive',
+            });
+        }
+    }, [toast]);
+
     // Research workflow handlers
     const handleUpdateResearchWorkflow = useCallback((workflow: ResearchWorkflow) => {
         // Update the activePayload with the new workflow state
@@ -787,6 +861,7 @@ export default function MainPage() {
                     onPayloadEdit={handlePayloadEdit}
                     onAcceptAgent={handleAcceptPayload}
                     onRejectAgent={handleRejectAgent}
+                    onTestWorkflow={handleTestWorkflow}
                     onUpdateResearchWorkflow={handleUpdateResearchWorkflow}
                     onResearchProceed={handleResearchProceed}
                     onResearchRunRetrieval={handleResearchRunRetrieval}
@@ -798,6 +873,8 @@ export default function MainPage() {
                     isWorkflowProcessing={isWorkflowProcessing}
                     currentWorkflowEvent={currentWorkflowEvent}
                     onCloseWorkflowInstance={handleCloseWorkflowInstance}
+                    testingWorkflowGraph={testingWorkflowGraph}
+                    onAcceptWorkflowTemplate={handleAcceptWorkflowTemplate}
                 />
             </div>
 

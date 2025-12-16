@@ -12,7 +12,7 @@ The engine:
 """
 
 import logging
-from typing import Any, AsyncGenerator, Dict, Optional, Callable
+from typing import Any, AsyncGenerator, Dict, List, Optional, Callable
 from datetime import datetime
 from dataclasses import dataclass
 
@@ -30,8 +30,59 @@ from schemas.workflow import (
 )
 from .registry import workflow_registry
 from .dynamic_executor import execute_dynamic_step
+from tools.registry import get_tool
 
 logger = logging.getLogger(__name__)
+
+
+def _tool_exists(tool_name: str) -> bool:
+    """Check if a tool exists in the tool registry."""
+    return get_tool(tool_name) is not None
+
+
+def _validate_initial_input(graph: WorkflowGraph, initial_input: Dict[str, Any]) -> List[str]:
+    """
+    Validate initial_input against the workflow's input_schema.
+
+    Returns list of error messages (empty if valid).
+    """
+    errors = []
+
+    if not graph.input_schema:
+        return errors  # No schema to validate against
+
+    schema = graph.input_schema
+    properties = schema.get("properties", {})
+    required = schema.get("required", [])
+
+    # Check required fields
+    for field in required:
+        if field not in initial_input:
+            errors.append(f"Missing required input field: '{field}'")
+        elif initial_input[field] is None:
+            errors.append(f"Required input field '{field}' cannot be None")
+
+    # Check types (basic validation)
+    for field, value in initial_input.items():
+        if field in properties:
+            expected_type = properties[field].get("type")
+            if expected_type and value is not None:
+                type_map = {
+                    "string": str,
+                    "number": (int, float),
+                    "integer": int,
+                    "boolean": bool,
+                    "array": list,
+                    "object": dict,
+                }
+                expected_python_type = type_map.get(expected_type)
+                if expected_python_type and not isinstance(value, expected_python_type):
+                    errors.append(
+                        f"Input field '{field}' has type {type(value).__name__}, "
+                        f"expected {expected_type}"
+                    )
+
+    return errors
 
 
 @dataclass
@@ -81,17 +132,40 @@ class WorkflowEngine:
         self,
         workflow_id: str,
         initial_input: Dict[str, Any],
-        conversation_id: Optional[int] = None
+        conversation_id: Optional[int] = None,
+        skip_data_flow_validation: bool = False
     ) -> WorkflowInstance:
-        """Create a new workflow instance from a registered workflow."""
+        """
+        Create a new workflow instance from a registered workflow.
+
+        Args:
+            workflow_id: ID of the registered workflow
+            initial_input: Input data for the workflow
+            conversation_id: Optional conversation ID to associate with
+            skip_data_flow_validation: Skip data flow validation (for execute_fn workflows)
+
+        Raises:
+            ValueError: If workflow not found or validation fails
+        """
         graph = workflow_registry.get(workflow_id)
         if not graph:
             raise ValueError(f"Workflow '{workflow_id}' not found in registry")
 
-        # Validate the graph
+        # Validate the graph structure
         errors = graph.validate()
         if errors:
-            raise ValueError(f"Invalid workflow graph: {errors}")
+            raise ValueError(f"Invalid workflow graph structure: {errors}")
+
+        # Validate data flow (for step_definition workflows)
+        if not skip_data_flow_validation:
+            data_flow_errors = graph.validate_data_flow(tool_validator=_tool_exists)
+            if data_flow_errors:
+                raise ValueError(f"Invalid workflow data flow: {data_flow_errors}")
+
+        # Validate initial input against schema
+        input_errors = _validate_initial_input(graph, initial_input)
+        if input_errors:
+            raise ValueError(f"Invalid workflow input: {input_errors}")
 
         instance = WorkflowInstance.create(
             graph=graph,
@@ -107,13 +181,36 @@ class WorkflowEngine:
         self,
         graph: WorkflowGraph,
         initial_input: Dict[str, Any],
-        conversation_id: Optional[int] = None
+        conversation_id: Optional[int] = None,
+        skip_data_flow_validation: bool = False
     ) -> WorkflowInstance:
-        """Create a new workflow instance from a graph definition (for dynamic workflows)."""
-        # Validate the graph
+        """
+        Create a new workflow instance from a graph definition (for dynamic workflows).
+
+        Args:
+            graph: The workflow graph definition
+            initial_input: Input data for the workflow
+            conversation_id: Optional conversation ID to associate with
+            skip_data_flow_validation: Skip data flow validation (for execute_fn workflows)
+
+        Raises:
+            ValueError: If validation fails
+        """
+        # Validate the graph structure
         errors = graph.validate()
         if errors:
-            raise ValueError(f"Invalid workflow graph: {errors}")
+            raise ValueError(f"Invalid workflow graph structure: {errors}")
+
+        # Validate data flow (for step_definition workflows)
+        if not skip_data_flow_validation:
+            data_flow_errors = graph.validate_data_flow(tool_validator=_tool_exists)
+            if data_flow_errors:
+                raise ValueError(f"Invalid workflow data flow: {data_flow_errors}")
+
+        # Validate initial input against schema
+        input_errors = _validate_initial_input(graph, initial_input)
+        if input_errors:
+            raise ValueError(f"Invalid workflow input: {input_errors}")
 
         instance = WorkflowInstance.create(
             graph=graph,

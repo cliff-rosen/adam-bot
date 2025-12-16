@@ -25,6 +25,9 @@ interface WorkflowExecutionViewProps {
     handlers: WorkflowHandlers;
     isProcessing?: boolean;
     currentEvent?: WorkflowEvent | null;
+    // Testing workflow graphs - when set, shows Accept button on completion
+    testingWorkflowGraph?: Record<string, any> | null;
+    onAcceptWorkflowTemplate?: (workflow: Record<string, any>) => void;
 }
 
 // Status badge component
@@ -564,6 +567,8 @@ export default function WorkflowExecutionView({
     handlers,
     isProcessing = false,
     currentEvent,
+    testingWorkflowGraph,
+    onAcceptWorkflowTemplate,
 }: WorkflowExecutionViewProps) {
     const [expandedSteps, setExpandedSteps] = useState<Set<string>>(new Set());
 
@@ -743,10 +748,29 @@ export default function WorkflowExecutionView({
             {/* Completed state */}
             {instance.status === 'completed' && (
                 <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
-                    <div className="flex items-center gap-2">
-                        <CheckCircleIcon className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
-                        <span className="font-medium text-gray-900 dark:text-white">Workflow completed</span>
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <CheckCircleIcon className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+                            <span className="font-medium text-gray-900 dark:text-white">
+                                {testingWorkflowGraph ? 'Test completed successfully!' : 'Workflow completed'}
+                            </span>
+                        </div>
+                        {/* Show Accept button when testing a workflow graph */}
+                        {testingWorkflowGraph && onAcceptWorkflowTemplate && (
+                            <button
+                                onClick={() => onAcceptWorkflowTemplate(testingWorkflowGraph)}
+                                className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors"
+                            >
+                                <CheckCircleIcon className="h-4 w-4" />
+                                Accept & Save
+                            </button>
+                        )}
                     </div>
+                    {testingWorkflowGraph && (
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
+                            Click "Accept & Save" to save this workflow as a template you can run again.
+                        </p>
+                    )}
                 </div>
             )}
 

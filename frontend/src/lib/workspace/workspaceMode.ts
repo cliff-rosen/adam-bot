@@ -103,6 +103,8 @@ export interface PayloadViewProps {
     onPayloadEdit?: (payload: WorkspacePayload) => void;
     onAccept?: (payload: WorkspacePayload) => void;
     onReject?: () => void;
+    // Workflow graph testing (for design_workflow tool)
+    onTest?: (workflow: any, inputs: Record<string, any>) => void;
     // Research workflow specific (for LLM-orchestrated research)
     onUpdateWorkflow?: (workflow: any) => void;
     onProceed?: () => void;
@@ -125,6 +127,9 @@ export interface WorkflowViewProps {
     isSavingAsset?: boolean;
     // Close/dismiss workflow
     onClose?: () => void;
+    // Testing workflow graphs - when set, shows Accept button on completion
+    testingWorkflowGraph?: Record<string, any> | null;
+    onAcceptWorkflowTemplate?: (workflow: Record<string, any>) => void;
 }
 
 /**

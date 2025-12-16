@@ -15,8 +15,13 @@ from typing import Any, Dict, Generator
 from sqlalchemy.orm import Session
 import anthropic
 
-from tools.registry import ToolConfig, ToolResult, ToolProgress, register_tool
+from tools.registry import ToolConfig, ToolResult, ToolProgress, register_tool, get_tool
 from schemas.workflow import WorkflowGraph, StepNode, StepDefinition, Edge, CheckpointConfig, CheckpointAction
+
+
+def _tool_exists(tool_name: str) -> bool:
+    """Check if a tool exists in the tool registry."""
+    return get_tool(tool_name) is not None
 
 logger = logging.getLogger(__name__)
 
@@ -313,13 +318,29 @@ Return ONLY the JSON workflow graph. No other text. Follow the exact schema from
         # Convert to WorkflowGraph and validate
         try:
             workflow_graph = WorkflowGraph.from_dict(workflow_data)
+
+            # Structure validation
             validation_errors = workflow_graph.validate()
 
+            # Data flow validation (checks input_fields, output_field, tools)
+            data_flow_errors = workflow_graph.validate_data_flow(tool_validator=_tool_exists)
+            validation_errors.extend(data_flow_errors)
+
             if validation_errors:
+                # Separate warnings from errors
+                error_types = {
+                    "structure": [e for e in validation_errors if "node" in e.lower() or "edge" in e.lower() or "entry" in e.lower()],
+                    "data_flow": [e for e in validation_errors if "input_field" in e.lower() or "output" in e.lower()],
+                    "tools": [e for e in validation_errors if "tool" in e.lower()],
+                }
+
                 yield ToolProgress(
                     stage="validation_warning",
-                    message=f"Workflow has validation issues: {', '.join(validation_errors)}",
-                    data={"errors": validation_errors}
+                    message=f"Workflow has validation issues: {len(validation_errors)} issue(s) found",
+                    data={
+                        "errors": validation_errors,
+                        "error_types": error_types
+                    }
                 )
         except Exception as e:
             logger.warning(f"Could not validate workflow graph: {e}")

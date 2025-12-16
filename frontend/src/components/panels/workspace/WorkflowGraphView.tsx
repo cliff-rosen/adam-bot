@@ -2,12 +2,12 @@
  * WorkflowGraphView
  *
  * Displays a designed workflow graph from the design_workflow tool.
- * Shows nodes, edges, and allows the user to execute the workflow.
+ * Shows nodes, edges, and allows the user to test the workflow.
  */
 
 import { useState, useMemo } from 'react';
 import {
-    PlayIcon,
+    BeakerIcon,
     CpuChipIcon,
     PauseCircleIcon,
     ChevronDownIcon,
@@ -20,11 +20,13 @@ import {
 import {
     WorkflowNode,
     WorkflowEdge,
+    WorkflowGraphData,
 } from '../../../types/chat';
 import { PayloadViewProps } from '../../../lib/workspace/workspaceMode';
 
 interface WorkflowGraphViewProps extends PayloadViewProps {
-    // Additional props specific to workflow graph view
+    // Callback for testing the workflow with inputs
+    onTest?: (workflow: WorkflowGraphData, inputs: Record<string, any>) => void;
 }
 
 // Node type styling
@@ -203,23 +205,39 @@ function EdgeDisplay({ edge, nodes }: { edge: WorkflowEdge; nodes: Record<string
     );
 }
 
-export default function WorkflowGraphView({ payload, onAccept }: WorkflowGraphViewProps) {
+export default function WorkflowGraphView({ payload, onTest }: WorkflowGraphViewProps) {
     const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
     const [showAllEdges, setShowAllEdges] = useState(false);
+    const [inputValues, setInputValues] = useState<Record<string, string>>({});
 
     const workflow = payload.workflow_graph_data;
 
-    // Handle execute - creates a payload with the workflow for execution
-    const handleExecute = () => {
-        if (workflow && onAccept) {
-            // Pass the payload with workflow data to onAccept for execution
-            onAccept({
-                ...payload,
-                // Include workflow_graph_data for the executor to use
-                workflow_graph_data: workflow,
-            });
+    // Initialize input values from schema
+    const inputFields = useMemo(() => {
+        const schema = workflow?.input_schema;
+        if (!schema?.properties) return [];
+        return Object.entries(schema.properties).map(([key, prop]: [string, any]) => ({
+            key,
+            type: prop.type || 'string',
+            description: prop.description || '',
+            required: schema.required?.includes(key) ?? false,
+        }));
+    }, [workflow]);
+
+    // Handle test - runs the workflow with provided inputs
+    const handleTest = () => {
+        if (workflow && onTest) {
+            onTest(workflow, inputValues);
         }
     };
+
+    // Check if all required inputs are filled
+    const canTest = useMemo(() => {
+        if (!workflow?.input_schema?.required) return true;
+        return workflow.input_schema.required.every(
+            (key: string) => inputValues[key]?.trim()
+        );
+    }, [workflow, inputValues]);
 
     // Validate workflow data
     if (!workflow) {
@@ -301,13 +319,18 @@ export default function WorkflowGraphView({ payload, onAccept }: WorkflowGraphVi
                             )}
                         </div>
                     </div>
-                    {onAccept && (
+                    {onTest && (
                         <button
-                            onClick={handleExecute}
-                            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors flex-shrink-0"
+                            onClick={handleTest}
+                            disabled={!canTest}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors flex-shrink-0 ${
+                                canTest
+                                    ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                                    : 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                            }`}
                         >
-                            <PlayIcon className="h-4 w-4" />
-                            Execute
+                            <BeakerIcon className="h-4 w-4" />
+                            Test
                         </button>
                     )}
                 </div>
@@ -359,19 +382,34 @@ export default function WorkflowGraphView({ payload, onAccept }: WorkflowGraphVi
                     )}
                 </div>
 
-                {/* Input Schema */}
-                {workflow.input_schema && workflow.input_schema.properties && (
+                {/* Test Inputs Form */}
+                {inputFields.length > 0 && (
                     <div>
                         <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                            Required Inputs
+                            Test Inputs
                         </h3>
-                        <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 space-y-2">
-                            {Object.entries(workflow.input_schema.properties).map(([key, prop]: [string, any]) => (
-                                <div key={key} className="text-sm">
-                                    <code className="font-medium text-gray-900 dark:text-white">{key}</code>
-                                    <span className="text-gray-500 dark:text-gray-400 ml-2">
-                                        {prop.description || prop.type}
-                                    </span>
+                        <div className="bg-gray-50 dark:bg-gray-800/50 rounded-lg p-3 space-y-3">
+                            {inputFields.map((field) => (
+                                <div key={field.key}>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        {field.key}
+                                        {field.required && <span className="text-red-500 ml-1">*</span>}
+                                    </label>
+                                    {field.description && (
+                                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                            {field.description}
+                                        </p>
+                                    )}
+                                    <textarea
+                                        value={inputValues[field.key] || ''}
+                                        onChange={(e) => setInputValues(prev => ({
+                                            ...prev,
+                                            [field.key]: e.target.value
+                                        }))}
+                                        placeholder={`Enter ${field.key}...`}
+                                        rows={2}
+                                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                                    />
                                 </div>
                             ))}
                         </div>

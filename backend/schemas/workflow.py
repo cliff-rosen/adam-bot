@@ -314,7 +314,7 @@ class WorkflowGraph:
 
     def validate(self) -> List[str]:
         """
-        Validate the workflow graph.
+        Validate the workflow graph structure.
         Returns a list of error messages (empty if valid).
         """
         errors = []
@@ -354,6 +354,159 @@ class WorkflowGraph:
         if unreachable:
             errors.append(f"Unreachable nodes: {unreachable}")
 
+        return errors
+
+    def validate_data_flow(self, tool_validator: Optional[Callable[[str], bool]] = None) -> List[str]:
+        """
+        Validate data flow through the workflow.
+
+        Checks:
+        1. All input_fields reference fields that will be available when the node runs
+        2. No output_field conflicts (same field written by unrelated nodes)
+        3. All referenced tools exist (if tool_validator provided)
+
+        Args:
+            tool_validator: Optional function that returns True if a tool name exists
+
+        Returns:
+            List of error messages (empty if valid)
+        """
+        errors = []
+
+        # Get fields available from input_schema
+        input_fields = set()
+        if self.input_schema and "properties" in self.input_schema:
+            input_fields = set(self.input_schema["properties"].keys())
+
+        # Build predecessor map for topological analysis
+        predecessors: Dict[str, set] = {node_id: set() for node_id in self.nodes}
+        for edge in self.edges:
+            if edge.to_node in predecessors:
+                predecessors[edge.to_node].add(edge.from_node)
+
+        # Track which fields each node produces
+        node_outputs: Dict[str, str] = {}  # node_id -> output_field
+        for node_id, node in self.nodes.items():
+            if node.node_type == "execute" and node.step_definition:
+                if node.step_definition.output_field:
+                    node_outputs[node_id] = node.step_definition.output_field
+
+        # Compute fields available at each node using topological traversal
+        # For each node, we compute the set of fields GUARANTEED to be available
+        # (intersection of fields available on all paths to this node)
+        fields_at_node: Dict[str, set] = {}
+
+        # BFS traversal respecting dependencies
+        visited = set()
+        queue = [self.entry_node] if self.entry_node else []
+
+        while queue:
+            node_id = queue.pop(0)
+            if node_id in visited:
+                continue
+
+            # Check if all predecessors have been processed
+            # (handles conditional/loop cases conservatively)
+            unprocessed_preds = predecessors[node_id] - visited
+            if unprocessed_preds and node_id != self.entry_node:
+                # Re-queue and try later (will eventually process due to DAG-like structure)
+                queue.append(node_id)
+                continue
+
+            visited.add(node_id)
+
+            # Compute available fields at this node
+            if node_id == self.entry_node:
+                # Entry node has access to input fields
+                available = input_fields.copy()
+            else:
+                # Intersection of fields from all predecessors
+                pred_fields = []
+                for pred_id in predecessors[node_id]:
+                    if pred_id in fields_at_node:
+                        pred_available = fields_at_node[pred_id].copy()
+                        # Add the predecessor's output if it has one
+                        if pred_id in node_outputs:
+                            pred_available.add(node_outputs[pred_id])
+                        pred_fields.append(pred_available)
+
+                if pred_fields:
+                    # Conservative: intersection of all paths
+                    available = pred_fields[0]
+                    for pf in pred_fields[1:]:
+                        available = available.intersection(pf)
+                else:
+                    available = input_fields.copy()
+
+            fields_at_node[node_id] = available
+
+            # Validate this node's input_fields
+            node = self.nodes[node_id]
+            if node.node_type == "execute" and node.step_definition:
+                step_def = node.step_definition
+
+                # Check input_fields
+                for field in step_def.input_fields:
+                    if field not in available:
+                        # Check if it could be available on some path (warning vs error)
+                        all_possible = input_fields.copy()
+                        for nid, output in node_outputs.items():
+                            all_possible.add(output)
+
+                        if field in all_possible:
+                            errors.append(
+                                f"Node '{node_id}': input_field '{field}' may not be available on all paths. "
+                                f"Guaranteed fields: {sorted(available)}"
+                            )
+                        else:
+                            errors.append(
+                                f"Node '{node_id}': input_field '{field}' does not exist. "
+                                f"Available fields: {sorted(available)}. "
+                                f"All possible fields: {sorted(all_possible)}"
+                            )
+
+                # Check tools exist
+                if tool_validator:
+                    for tool_name in step_def.tools:
+                        if not tool_validator(tool_name):
+                            errors.append(f"Node '{node_id}': tool '{tool_name}' does not exist")
+
+            # Queue successors
+            for edge in self.edges:
+                if edge.from_node == node_id and edge.to_node not in visited:
+                    queue.append(edge.to_node)
+
+        # Check for output_field conflicts
+        # (Two nodes writing to the same field where neither is ancestor of the other)
+        output_to_nodes: Dict[str, List[str]] = {}
+        for node_id, output in node_outputs.items():
+            if output not in output_to_nodes:
+                output_to_nodes[output] = []
+            output_to_nodes[output].append(node_id)
+
+        for output, writers in output_to_nodes.items():
+            if len(writers) > 1:
+                # Check if they're on mutually exclusive paths (OK) or conflicting (error)
+                # For now, just warn - proper analysis would check if paths are exclusive
+                errors.append(
+                    f"Multiple nodes write to '{output}': {writers}. "
+                    f"This may cause conflicts unless they're on mutually exclusive paths."
+                )
+
+        return errors
+
+    def validate_all(self, tool_validator: Optional[Callable[[str], bool]] = None) -> List[str]:
+        """
+        Run all validations (structure + data flow).
+
+        Args:
+            tool_validator: Optional function that returns True if a tool name exists
+
+        Returns:
+            List of all error messages (empty if valid)
+        """
+        errors = self.validate()  # Structure validation
+        errors.extend(self.validate_data_flow(tool_validator))  # Data flow validation
         return errors
 
     def to_dict(self) -> Dict[str, Any]:

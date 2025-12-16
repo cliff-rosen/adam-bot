@@ -22,6 +22,8 @@ interface WorkspacePanelProps {
     // Agent callbacks
     onAcceptAgent?: (payload: WorkspacePayload) => void;
     onRejectAgent?: () => void;
+    // Workflow graph testing callback
+    onTestWorkflow?: (workflow: any, inputs: Record<string, any>) => void;
     // Research workflow callbacks (for LLM-orchestrated research)
     onUpdateResearchWorkflow?: (workflow: ResearchWorkflow) => void;
     onResearchProceed?: () => void;
@@ -35,6 +37,9 @@ interface WorkspacePanelProps {
     isWorkflowProcessing?: boolean;
     currentWorkflowEvent?: WorkflowEvent | null;
     onCloseWorkflowInstance?: () => void;
+    // Workflow testing/accept props
+    testingWorkflowGraph?: Record<string, any> | null;
+    onAcceptWorkflowTemplate?: (workflow: Record<string, any>) => void;
 }
 
 export default function WorkspacePanel({
@@ -48,6 +53,7 @@ export default function WorkspacePanel({
     onPayloadEdit,
     onAcceptAgent,
     onRejectAgent,
+    onTestWorkflow,
     onUpdateResearchWorkflow,
     onResearchProceed,
     onResearchRunRetrieval,
@@ -59,6 +65,8 @@ export default function WorkspacePanel({
     isWorkflowProcessing = false,
     currentWorkflowEvent,
     onCloseWorkflowInstance,
+    testingWorkflowGraph,
+    onAcceptWorkflowTemplate,
 }: WorkspacePanelProps) {
 
     // Determine workspace mode using single function
@@ -89,6 +97,8 @@ export default function WorkspacePanel({
                         onSaveAsAsset={onSavePayloadAsAsset}
                         isSavingAsset={isSavingAsset}
                         onClose={onCloseWorkflowInstance}
+                        testingWorkflowGraph={testingWorkflowGraph}
+                        onAcceptWorkflowTemplate={onAcceptWorkflowTemplate}
                     />
                 </div>
             );
@@ -141,6 +151,8 @@ export default function WorkspacePanel({
                         onPayloadEdit={onPayloadEdit}
                         onAccept={onAcceptAgent}
                         onReject={onRejectAgent}
+                        // Workflow graph testing callback
+                        onTest={onTestWorkflow}
                         // Research workflow callbacks
                         onUpdateWorkflow={onUpdateResearchWorkflow}
                         onProceed={onResearchProceed}

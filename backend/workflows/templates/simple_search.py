@@ -83,12 +83,12 @@ async def generate_query(context: WorkflowContext) -> StepOutput:
                 "role": "user",
                 "content": f"""Generate a concise, effective web search query for this question:
 
-Question: "{user_question}"
+                Question: "{user_question}"
 
-Return ONLY a JSON object:
-{{"query": "your search query here", "intent": "brief description of what we're looking for"}}
+                Return ONLY a JSON object:
+                {{"query": "your search query here", "intent": "brief description of what we're looking for"}}
 
-JSON:"""
+                JSON:"""
             }]
         )
 
@@ -207,12 +207,12 @@ async def evaluate_and_retrieve(context: WorkflowContext) -> AsyncGenerator[Unio
                 "role": "user",
                 "content": f"""Which search results are most likely to answer: "{original_question}"?
 
-Results:
-{results_text}
+                Results:
+                {results_text}
 
-Return a JSON array of result numbers (1-indexed) to fetch, max 3.
-Example: [1, 3]
-JSON array:"""
+                Return a JSON array of result numbers (1-indexed) to fetch, max 3.
+                Example: [1, 3]
+                JSON array:"""
             }]
         )
 
@@ -312,13 +312,13 @@ async def generate_answer(context: WorkflowContext) -> StepOutput:
                 "role": "user",
                 "content": f"""Answer this question based on the provided content:
 
-Question: "{original_question}"
+                Question: "{original_question}"
 
-Content:
-{content_text}
+                Content:
+                {content_text}
 
-Provide a clear, concise answer. If the content doesn't fully answer the question, note what's missing.
-Include relevant facts and cite sources where applicable."""
+                Provide a clear, concise answer. If the content doesn't fully answer the question, note what's missing.
+                Include relevant facts and cite sources where applicable."""
             }]
         )
 
