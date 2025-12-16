@@ -782,7 +782,6 @@ export default function WorkflowExecutionView({
                 const failedNode = failedNodes[0];
                 const errorMessage = failedNode?.[1]?.error;
                 const failedNodeId = failedNode?.[0];
-                const failedNodeName = failedNodeId && workflow?.nodes?.[failedNodeId]?.name;
 
                 return (
                     <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
@@ -790,9 +789,9 @@ export default function WorkflowExecutionView({
                             <ExclamationTriangleIcon className="h-5 w-5 text-red-600 dark:text-red-400" />
                             <span className="font-medium text-red-900 dark:text-red-200">Workflow failed</span>
                         </div>
-                        {failedNodeName && (
+                        {failedNodeId && (
                             <p className="mt-2 text-sm text-red-700 dark:text-red-300">
-                                <span className="font-medium">Failed at:</span> {failedNodeName}
+                                <span className="font-medium">Failed at:</span> {failedNodeId}
                             </p>
                         )}
                         {errorMessage && (
@@ -804,7 +803,7 @@ export default function WorkflowExecutionView({
                         )}
                         <div className="mt-3 flex gap-2">
                             <button
-                                onClick={onCancel}
+                                onClick={handlers.onCancel}
                                 className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/60 transition-colors"
                             >
                                 Close
