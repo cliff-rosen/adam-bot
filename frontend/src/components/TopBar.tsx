@@ -1,6 +1,6 @@
 import { useTheme } from '../context/ThemeContext';
 import { NavLink, useLocation } from 'react-router-dom';
-import { MoonIcon, SunIcon, UserCircleIcon, ChatBubbleLeftRightIcon, WrenchScrewdriverIcon, CpuChipIcon } from '@heroicons/react/24/outline';
+import { MoonIcon, SunIcon, HomeIcon } from '@heroicons/react/24/outline';
 import settings from '../config/settings';
 import { useAuth } from '../context/AuthContext';
 
@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext';
 export default function TopBar() {
     const { isDarkMode, toggleTheme } = useTheme();
     const location = useLocation();
-    const { logout } = useAuth();
+    const { logout, user } = useAuth();
 
     const getLinkClass = (path: string) => {
         const isActive = location.pathname === path;
@@ -31,30 +31,33 @@ export default function TopBar() {
                 {/* Navigation */}
                 <nav className="flex items-center gap-2">
                     <NavLink to="/" className={getLinkClass('/')}>
-                        <ChatBubbleLeftRightIcon className="h-5 w-5 mr-2" />
-                        Chat
-                    </NavLink>
-                    <NavLink to="/agents" className={getLinkClass('/agents')}>
-                        <CpuChipIcon className="h-5 w-5 mr-2" />
-                        Agents
-                    </NavLink>
-                    <NavLink to="/tools" className={getLinkClass('/tools')}>
-                        <WrenchScrewdriverIcon className="h-5 w-5 mr-2" />
-                        Tools
+                        <HomeIcon className="h-5 w-5 mr-2" />
+                        Dashboard
                     </NavLink>
                 </nav>
             </div>
 
-            <div className="flex items-center gap-6">
-                <button onClick={toggleTheme} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white">
-                    {isDarkMode ? <SunIcon className="h-6 w-6" /> : <MoonIcon className="h-6 w-6" />}
+            <div className="flex items-center gap-4">
+                {/* User info */}
+                {user && (
+                    <span className="text-sm text-gray-600 dark:text-gray-400">
+                        {user.username}
+                    </span>
+                )}
+
+                {/* Theme toggle */}
+                <button
+                    onClick={toggleTheme}
+                    className="p-2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
+                    title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                >
+                    {isDarkMode ? <SunIcon className="h-5 w-5" /> : <MoonIcon className="h-5 w-5" />}
                 </button>
-                <NavLink to="/profile" className={getLinkClass('/profile')}>
-                    <UserCircleIcon className="h-6 w-6" />
-                </NavLink>
+
+                {/* Logout */}
                 <button
                     onClick={logout}
-                    className="text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white"
+                    className="px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-white rounded-md hover:bg-gray-100 dark:hover:bg-gray-700"
                 >
                     Logout
                 </button>
