@@ -125,10 +125,12 @@ async def start_workflow(request: StartWorkflowRequest):
             )
         elif request.workflow_id:
             # Create instance from registered template
+            # Skip data flow validation for template workflows (they use execute_fn, not step_definition)
             instance = workflow_engine.create_instance(
                 workflow_id=request.workflow_id,
                 initial_input=request.initial_input,
-                conversation_id=request.conversation_id
+                conversation_id=request.conversation_id,
+                skip_data_flow_validation=True
             )
         else:
             raise HTTPException(
