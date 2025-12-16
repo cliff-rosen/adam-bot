@@ -57,12 +57,14 @@ class SerpApiService:
         if not self.api_key:
             logger.warning("SERPAPI_KEY not set - SerpAPI calls will fail")
 
-    def _make_request(self, params: Dict[str, Any]) -> Dict[str, Any]:
+    def _make_request(self, params: Dict[str, Any], timeout_seconds: float = 15.0) -> Dict[str, Any]:
         """Make a request to SerpAPI."""
         params["api_key"] = self.api_key
         params["output"] = "json"
 
-        with httpx.Client(timeout=30.0) as client:
+        timeout = httpx.Timeout(timeout_seconds, connect=5.0)
+
+        with httpx.Client(timeout=timeout) as client:
             response = client.get(SERPAPI_BASE_URL, params=params)
             response.raise_for_status()
             return response.json()
@@ -224,8 +226,28 @@ class SerpApiService:
 
             data = self._make_request(params)
 
-            # Parse local results
+            # Parse results - Google returns either local_results (multiple) or place_results (single exact match)
             businesses = []
+
+            # Check for single exact match first
+            if data.get("place_results"):
+                result = data["place_results"]
+                data_id = result.get("data_id", "")
+                place_id = result.get("place_id", "")
+                biz = SerpApiBusiness(
+                    name=result.get("title", ""),
+                    place_id=data_id or place_id,
+                    address=result.get("address"),
+                    rating=result.get("rating"),
+                    review_count=result.get("reviews"),
+                    phone=result.get("phone"),
+                    url=result.get("website"),
+                    source="google"
+                )
+                if biz.place_id and biz.name:
+                    businesses.append(biz)
+
+            # Then check for multiple results
             for result in data.get("local_results", []):
                 # Google uses data_id for reviews lookup
                 data_id = result.get("data_id", "")
@@ -267,56 +289,80 @@ class SerpApiService:
     def get_google_reviews(
         self,
         data_id: str,
-        num_reviews: int = 20
+        num_reviews: int = 20,
+        sort_by: Optional[str] = None
     ) -> SerpApiResult:
         """
-        Get reviews for a Google Maps place.
+        Get reviews for a Google Maps place with pagination support.
 
         Args:
             data_id: The Google data_id (e.g., "0x89c259a61c75684f:0x79d31adb19735291")
-            num_reviews: Number of reviews to fetch
+            num_reviews: Number of reviews to fetch (will paginate to get this many)
+            sort_by: Optional sort order - "qualityScore", "newestFirst", "ratingHigh", "ratingLow"
         """
         if not self.api_key:
             return SerpApiResult(success=False, error="SERPAPI_KEY not configured")
 
         try:
-            params = {
-                "engine": "google_maps_reviews",
-                "data_id": data_id,
-            }
-
-            data = self._make_request(params)
-
-            reviews = []
-            for r in data.get("reviews", []):
-                review = SerpApiReview(
-                    rating=r.get("rating"),
-                    text=r.get("snippet", "") or r.get("extracted_snippet", {}).get("original", ""),
-                    author=r.get("user", {}).get("name"),
-                    date=r.get("date"),
-                    source="google"
-                )
-                if review.text:
-                    reviews.append(review)
-
-            # Get place info
-            place_info = data.get("place_info", {})
+            all_reviews = []
             business = None
-            if place_info:
-                business = SerpApiBusiness(
-                    name=place_info.get("title", ""),
-                    place_id=data_id,
-                    rating=place_info.get("rating"),
-                    review_count=place_info.get("reviews"),
-                    address=place_info.get("address"),
-                    source="google"
-                )
+            next_token = None
+            max_pages = (num_reviews // 8) + 2  # ~8-10 reviews per page, +1 for safety
+
+            for page in range(max_pages):
+                params = {
+                    "engine": "google_maps_reviews",
+                    "data_id": data_id,
+                }
+                if sort_by:
+                    params["sort_by"] = sort_by
+                if next_token:
+                    params["next_page_token"] = next_token
+
+                data = self._make_request(params)
+
+                # Parse reviews from this page
+                for r in data.get("reviews", []):
+                    review = SerpApiReview(
+                        rating=r.get("rating"),
+                        text=r.get("snippet", "") or r.get("extracted_snippet", {}).get("original", ""),
+                        author=r.get("user", {}).get("name"),
+                        date=r.get("date"),
+                        source="google"
+                    )
+                    if review.text:
+                        all_reviews.append(review)
+
+                # Get place info from first page only
+                if page == 0:
+                    place_info = data.get("place_info", {})
+                    if place_info:
+                        business = SerpApiBusiness(
+                            name=place_info.get("title", ""),
+                            place_id=data_id,
+                            rating=place_info.get("rating"),
+                            review_count=place_info.get("reviews"),
+                            address=place_info.get("address"),
+                            source="google"
+                        )
+
+                # Check if we have enough reviews
+                if len(all_reviews) >= num_reviews:
+                    break
+
+                # Get next page token
+                pagination = data.get("serpapi_pagination", {})
+                next_token = pagination.get("next_page_token")
+                if not next_token:
+                    break  # No more pages
+
+            logger.info(f"SerpAPI: Fetched {len(all_reviews)} Google reviews over {page + 1} pages")
 
             return SerpApiResult(
                 success=True,
                 business=business,
-                reviews=reviews[:num_reviews],
-                raw_response=data
+                reviews=all_reviews[:num_reviews],
+                raw_response=data  # Last page's response
             )
 
         except httpx.HTTPStatusError as e:
