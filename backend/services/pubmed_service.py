@@ -606,7 +606,7 @@ class PubMedService:
         high = low + batch_size
 
         headers = {
-            'User-Agent': 'CMRBot/1.0 (Research Assistant; Contact: admin@example.com)'
+            'User-Agent': 'JobForge/1.0 (Research Assistant; Contact: admin@example.com)'
         }
 
         while low < len(ids):

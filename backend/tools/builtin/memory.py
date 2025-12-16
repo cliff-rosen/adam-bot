@@ -1,5 +1,5 @@
 """
-Memory tools for CMR Bot primary agent.
+Memory tools for JobForge primary agent.
 
 These tools allow the agent to manage user memories:
 - Save important information for future reference

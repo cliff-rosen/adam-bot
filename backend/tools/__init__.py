@@ -1,5 +1,5 @@
 """
-Tools Package for CMR Bot
+Tools Package for JobForge
 
 This package contains the tool registry and built-in tools for the primary agent.
 Tools are capabilities the agent can invoke during conversations.

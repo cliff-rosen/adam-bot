@@ -26,12 +26,12 @@ interface AuthContextType {
     sessionId: string | null
     sessionName: string | null
     chatId: string | null
-    /** @deprecated mission_id is deprecated for CMR Bot */
+    /** @deprecated mission_id is deprecated for JobForge */
     missionId: string | null
     sessionMetadata: Record<string, any>
 
     // Session methods
-    /** @deprecated updateSessionMission is deprecated for CMR Bot */
+    /** @deprecated updateSessionMission is deprecated for JobForge */
     updateSessionMission: (missionId: string) => Promise<void>
     updateSessionMetadata: (metadata: Record<string, any>) => Promise<void>
     switchToNewSession: (sessionData: { session_id: string; session_name: string; chat_id: string; mission_id?: string; session_metadata: Record<string, any> }) => void
@@ -147,7 +147,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const fetchActiveSession = async () => {
         try {
-            // CMR Bot uses simplified auth - skip active session fetch
+            // JobForge uses simplified auth - skip active session fetch
             // Session data is set from login response only
             return
 
@@ -244,7 +244,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     // Session management functions
     const updateSessionMission = async (newMissionId: string) => {
-        console.warn('[DEPRECATED] updateSessionMission is deprecated for CMR Bot. This functionality will be removed in a future version.')
+        console.warn('[DEPRECATED] updateSessionMission is deprecated for JobForge. This functionality will be removed in a future version.')
         if (!sessionId) return
 
         try {

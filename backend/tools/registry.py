@@ -1,5 +1,5 @@
 """
-Tool Registry for CMR Bot
+Tool Registry for JobForge
 
 Global registry of tools available to the primary agent.
 Tools are capabilities the agent can invoke regardless of UI state.

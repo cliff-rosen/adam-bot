@@ -74,7 +74,7 @@ class ArxivService:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "CMR-Bot/1.0 (Research Assistant)"
+            "User-Agent": "JobForge/1.0 (Research Assistant)"
         })
 
     def search(

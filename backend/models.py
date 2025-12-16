@@ -1,5 +1,5 @@
 """
-CMR-Bot Database Models
+JobForge Database Models
 
 Simplified models for the personal AI agent system.
 Core entities: Users, Profiles, Conversations, Messages, Memories, Assets

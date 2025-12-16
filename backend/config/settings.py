@@ -7,7 +7,7 @@ load_dotenv(override=True)
 
 
 class Settings(BaseSettings):
-    APP_NAME: str = "CMR Bot"
+    APP_NAME: str = "JobForge"
     SETTING_VERSION: str = "0.0.1"
     FRONTEND_URL: str = "http://localhost:5173"
 

@@ -12,16 +12,16 @@ const currentHost = window.location.hostname;
 const isLocalhost = currentHost === 'localhost' || currentHost === '127.0.0.1';
 
 const productionSettings: Settings = {
-    apiUrl: 'https://api.cmr-bot.ai',
-    appName: 'CMR Bot',
-    logoUrl: '/cmr-logo.png'
+    apiUrl: 'https://api.jobforge.ai',
+    appName: 'JobForge',
+    logoUrl: '/jobforge-logo.png'
 };
 
 const developmentSettings: Settings = {
     // Use the current host for the API URL in development
     apiUrl: isLocalhost ? 'http://localhost:8000' : `http://${currentHost}:8000`,
-    appName: 'CMR Bot (Dev)',
-    logoUrl: '/kh-logo.png'
+    appName: 'JobForge (Dev)',
+    logoUrl: '/jobforge-logo.png'
 };
 
 // Select settings based on environment

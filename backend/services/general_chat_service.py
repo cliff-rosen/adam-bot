@@ -1,5 +1,5 @@
 """
-General Chat Service for CMR Bot
+General Chat Service for JobForge
 
 Handles the primary agent's chat interactions with tool support.
 Uses the generic agent_loop for the agentic processing.
@@ -259,9 +259,9 @@ class GeneralChatService:
         context_section = self._build_context_section(user_message, include_profile)
         workflow_section = self._build_workflow_section(has_workflow_builder)
 
-        return f"""You are CMR Bot, a personal AI assistant with full access to tools and capabilities.
+        return f"""You are JobForge, a personal AI assistant with full access to tools and capabilities.
 
-        You are the primary agent in a personal AI system designed for deep integration and autonomy. You help the user with research, information gathering, analysis, and various tasks.
+        You are the primary agent in a personal AI system designed for deep integration and autonomy. You help the user with job searching, career development, research, information gathering, analysis, and various tasks.
 
         **IMPORTANT - Current Date: {current_date}** (Use this date for all time-relative queries like "recent", "last month", etc.)
 

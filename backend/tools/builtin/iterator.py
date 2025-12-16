@@ -1,5 +1,5 @@
 """
-Iterator tool for CMR Bot.
+Iterator tool for JobForge.
 
 Processes each item in a list with an operation (LLM prompt, tool call, or agent).
 Supports parallel execution for efficiency, or sequential for rate-limited APIs.

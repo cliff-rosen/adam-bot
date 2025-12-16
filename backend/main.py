@@ -79,7 +79,7 @@ async def startup_event():
 @app.get("/")
 async def root():
     """Root endpoint - redirects to API health check"""
-    return {"message": "CMR-Bot API", "health": "/api/health", "docs": "/docs"}
+    return {"message": "JobForge API", "health": "/api/health", "docs": "/docs"}
 
 @app.get("/api/health")
 async def health_check():

@@ -1,5 +1,5 @@
 """
-Built-in tools for CMR Bot.
+Built-in tools for JobForge.
 
 This package contains the standard tools available to the agent.
 """

@@ -1,5 +1,5 @@
 """
-Schemas package for CMR-Bot API
+Schemas package for JobForge API
 """
 
 from .auth import (

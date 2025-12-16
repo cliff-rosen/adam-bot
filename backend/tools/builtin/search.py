@@ -1,5 +1,5 @@
 """
-Search tools for CMR Bot primary agent.
+Search tools for JobForge primary agent.
 
 Includes web search and webpage fetching capabilities.
 """

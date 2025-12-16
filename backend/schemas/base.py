@@ -1,5 +1,5 @@
 """
-Base Schema Definitions for CMR-Bot
+Base Schema Definitions for JobForge
 """
 
 from pydantic import BaseModel, Field

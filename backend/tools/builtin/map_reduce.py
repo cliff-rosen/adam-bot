@@ -1,5 +1,5 @@
 """
-MapReduce tool for CMR Bot.
+MapReduce tool for JobForge.
 
 Processes a list of items with a map operation (in parallel),
 then combines all results with a reduce operation.
