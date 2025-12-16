@@ -775,14 +775,44 @@ export default function WorkflowExecutionView({
             )}
 
             {/* Failed state */}
-            {instance.status === 'failed' && (
-                <div className="mt-4 p-4 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl">
-                    <div className="flex items-center gap-2">
-                        <ExclamationTriangleIcon className="h-5 w-5 text-red-600 dark:text-red-400" />
-                        <span className="font-medium text-gray-900 dark:text-white">Workflow failed</span>
+            {instance.status === 'failed' && (() => {
+                // Find the failed node and its error message
+                const failedNodes = Object.entries(instance.node_states || {})
+                    .filter(([_, state]) => state.status === 'failed');
+                const failedNode = failedNodes[0];
+                const errorMessage = failedNode?.[1]?.error;
+                const failedNodeId = failedNode?.[0];
+                const failedNodeName = failedNodeId && workflow?.nodes?.[failedNodeId]?.name;
+
+                return (
+                    <div className="mt-4 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
+                        <div className="flex items-center gap-2">
+                            <ExclamationTriangleIcon className="h-5 w-5 text-red-600 dark:text-red-400" />
+                            <span className="font-medium text-red-900 dark:text-red-200">Workflow failed</span>
+                        </div>
+                        {failedNodeName && (
+                            <p className="mt-2 text-sm text-red-700 dark:text-red-300">
+                                <span className="font-medium">Failed at:</span> {failedNodeName}
+                            </p>
+                        )}
+                        {errorMessage && (
+                            <div className="mt-2 p-3 bg-red-100 dark:bg-red-900/40 rounded-lg">
+                                <p className="text-sm text-red-800 dark:text-red-200 font-mono whitespace-pre-wrap break-words">
+                                    {errorMessage}
+                                </p>
+                            </div>
+                        )}
+                        <div className="mt-3 flex gap-2">
+                            <button
+                                onClick={onCancel}
+                                className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/60 transition-colors"
+                            >
+                                Close
+                            </button>
+                        </div>
                     </div>
-                </div>
-            )}
+                );
+            })()}
         </div>
     );
 }

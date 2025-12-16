@@ -146,8 +146,8 @@ async def _execute_tool_call(
     try:
         result_data = None
 
-        # Import execute_tool from registry
-        from tools.registry import execute_tool
+        # Import execute_tool from tools package
+        from tools import execute_tool
 
         async for item in execute_tool(
             step_def.tool,
