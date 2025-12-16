@@ -179,12 +179,13 @@ class StepDefinition:
         # input_fields are explicit references
         fields.update(self.input_fields)
 
-        # input_mapping may contain {field} templates
+        # input_mapping may contain {field} or {field.subfield} templates
         if self.input_mapping:
             import re
             for value in self.input_mapping.values():
-                # Extract {field_name} patterns
-                matches = re.findall(r'\{(\w+)\}', str(value))
+                # Extract {field_name} or {field_name.property} patterns
+                # We only care about the root field name for validation
+                matches = re.findall(r'\{(\w+)(?:\.\w+)*\}', str(value))
                 fields.update(matches)
 
         return list(fields)

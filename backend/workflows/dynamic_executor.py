@@ -197,9 +197,9 @@ def _resolve_input_mapping(
     """
     Resolve input_mapping templates with context values.
 
-    Templates use {field_name} syntax:
-    - {"query": "{name} {company}"} with context {name: "John", company: "Acme"}
-    - Resolves to {"query": "John Acme"}
+    Templates use {field_name} or {field_name.property} syntax:
+    - {"query": "{name} {company}"} -> {"query": "John Acme"}
+    - {"url": "{result.url}"} -> {"url": "https://..."}
 
     Non-template values are passed through:
     - {"max_results": "10"} -> {"max_results": "10"}
@@ -214,14 +214,14 @@ def _resolve_input_mapping(
         # Check if it's a template (contains {field})
         if '{' in template:
             result = template
-            # Find all {field} patterns
-            fields = re.findall(r'\{(\w+)\}', template)
-            for field in fields:
-                value = _get_context_value(field, context)
+            # Find all {field} or {field.subfield.subfield} patterns
+            field_refs = re.findall(r'\{([\w.]+)\}', template)
+            for field_path in field_refs:
+                value = _get_context_value(field_path, context)
                 if value is not None:
                     # Convert to string for template substitution
                     str_value = json.dumps(value) if isinstance(value, (dict, list)) else str(value)
-                    result = result.replace(f'{{{field}}}', str_value)
+                    result = result.replace(f'{{{field_path}}}', str_value)
             resolved[param] = result
         else:
             # Not a template - pass through (maybe convert numbers)
@@ -230,18 +230,35 @@ def _resolve_input_mapping(
     return resolved
 
 
-def _get_context_value(field: str, context: WorkflowContext) -> Any:
-    """Get a value from context by field name."""
-    # Check variables (where step outputs are stored)
-    if field in context.variables:
-        return context.variables[field]
-    # Check step_data
-    if field in context.step_data:
-        return context.step_data[field]
-    # Check initial_input
-    if field in context.initial_input:
-        return context.initial_input[field]
-    return None
+def _get_context_value(field_path: str, context: WorkflowContext) -> Any:
+    """
+    Get a value from context by field path.
+
+    Supports dotted paths like "result.url" to access nested objects.
+    """
+    parts = field_path.split('.')
+    root_field = parts[0]
+
+    # Get the root value
+    value = None
+    if root_field in context.variables:
+        value = context.variables[root_field]
+    elif root_field in context.step_data:
+        value = context.step_data[root_field]
+    elif root_field in context.initial_input:
+        value = context.initial_input[root_field]
+
+    if value is None:
+        return None
+
+    # Navigate nested path
+    for part in parts[1:]:
+        if isinstance(value, dict) and part in value:
+            value = value[part]
+        else:
+            return None
+
+    return value
 
 
 # =============================================================================
