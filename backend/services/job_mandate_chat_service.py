@@ -24,6 +24,7 @@ from schemas.job_mandate import (
 )
 from schemas.general_chat import (
     ChatResponsePayload,
+    CustomPayload,
     TextDeltaEvent,
     StatusEvent,
     CompleteEvent,
@@ -237,15 +238,17 @@ class JobMandateChatService:
             final_payload = ChatResponsePayload(
                 message=response_text,
                 conversation_id=conversation_id,
-                custom_payload={
-                    "type": "mandate_interview",
-                    "mandate_id": mandate_id,
-                    "is_complete": is_complete,
-                    "current_section": mandate.current_section.value if not is_complete else None,
-                    "action": action,
-                    "insights_added": len(new_items),
-                    "section_advanced": section_advanced
-                }
+                custom_payload=CustomPayload(
+                    type="mandate_interview",
+                    data={
+                        "mandate_id": mandate_id,
+                        "is_complete": is_complete,
+                        "current_section": mandate.current_section.value if not is_complete else None,
+                        "action": action,
+                        "insights_added": len(new_items),
+                        "section_advanced": section_advanced
+                    }
+                )
             )
 
             yield CompleteEvent(payload=final_payload).model_dump_json()

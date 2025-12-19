@@ -214,7 +214,7 @@ export default function JobMandateInterview() {
                 if (event.payload.conversation_id) {
                     setConversationId(event.payload.conversation_id);
                 }
-                if (event.payload.custom_payload?.is_complete) {
+                if (event.payload.custom_payload?.data?.is_complete) {
                     setIsComplete(true);
                 }
                 break;

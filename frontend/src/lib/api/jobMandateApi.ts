@@ -97,12 +97,14 @@ export interface CompleteEvent {
         conversation_id?: number;
         custom_payload?: {
             type: string;
-            mandate_id: number;
-            is_complete: boolean;
-            current_section?: MandateSectionType;
-            action: 'extract' | 'clarify';
-            insights_added: number;
-            section_advanced: boolean;
+            data: {
+                mandate_id: number;
+                is_complete: boolean;
+                current_section?: MandateSectionType;
+                action: 'extract' | 'clarify';
+                insights_added: number;
+                section_advanced: boolean;
+            };
         };
     };
 }

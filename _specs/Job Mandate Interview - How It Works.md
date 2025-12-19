@@ -155,6 +155,93 @@ After all four sections complete, the mandate is finalized.
 
 ---
 
+### State Management and Continuity
+
+A key question: when the user sends a new message, how does the system know what's already been captured? Where does the state live?
+
+#### What's Stored Where
+
+| Location | What's Stored | Why |
+|----------|---------------|-----|
+| **Backend Database** | Mandate record, all captured items, section statuses, conversation history | Permanent storage; survives page refreshes |
+| **Frontend (React)** | Current view of sections and items, UI state (which sections expanded) | Fast display; updates in real-time |
+
+The **backend is the source of truth**. The frontend mirrors it for display purposes.
+
+#### The Flow: How Continuity Works
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 1. USER SENDS MESSAGE                                                    │
+│    Frontend sends: message + mandate_id + conversation_id                │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 2. BACKEND LOADS STATE FROM DATABASE                                     │
+│    - Fetches mandate record (current section, section statuses)          │
+│    - Fetches all items already captured                                  │
+│    - Fetches conversation history                                        │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 3. BACKEND BUILDS PROMPT WITH CURRENT STATE                              │
+│    - Includes: "Items captured so far: [list from database]"             │
+│    - Includes: "Current section: [from database]"                        │
+│    - Includes: Full conversation history                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 4. LLM RESPONDS (via tool use)                                           │
+│    - Decides: extract or clarify                                         │
+│    - Returns: insights (if any), section_complete, response text         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 5. BACKEND UPDATES DATABASE                                              │
+│    - Saves new items to database                                         │
+│    - Updates section status if advancing                                 │
+│    - Saves assistant message to conversation                             │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 6. BACKEND STREAMS UPDATES TO FRONTEND                                   │
+│    - Sends: mandate_update event (new items, updated sections)           │
+│    - Sends: text chunks (the response to display)                        │
+│    - Sends: complete event (final state)                                 │
+└─────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌─────────────────────────────────────────────────────────────────────────┐
+│ 7. FRONTEND UPDATES ITS VIEW                                             │
+│    - Adds new items to section panel                                     │
+│    - Collapses completed section, expands new one                        │
+│    - Displays the response message                                       │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Point: Backend Fetches Its Own State
+
+The frontend does **not** send the current mandate state with each message. It only sends:
+- The user's message
+- The mandate ID
+- The conversation ID
+
+The backend then **looks up everything it needs from the database**. This means:
+- The frontend can't get out of sync
+- If the user refreshes the page, the backend still has everything
+- Multiple devices would see the same state
+
+#### What the Frontend Receives Back
+
+After each message, the backend streams events to the frontend:
+
+1. **`mandate_update`** - Contains the new state of all sections and any new items
+2. **`text_delta`** - Chunks of the response text (for streaming display)
+3. **`complete`** - Final confirmation with conversation ID
+
+The frontend uses these events to update its local view, but it never needs to "remember" anything—it just reflects what the backend tells it.
+
+---
+
 ## Summary
 
 | Requirement | How It's Fulfilled |
@@ -165,3 +252,4 @@ After all four sections complete, the mandate is finalized.
 | Extract vs. clarify | Single LLM decision returned through `interview_response` tool |
 | Natural section flow | LLM determines completion based on quantity + user signals |
 | Reliable structure | Tool use guarantees we get data in the expected format every time |
+| State continuity | Backend fetches state from database; frontend just displays what it receives |
