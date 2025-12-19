@@ -17,6 +17,7 @@ import { LoginForm } from './components/features/auth';
 // pages
 import MainPage from './pages/MainPage';
 import TokenLogin from './pages/TokenLogin';
+import JobMandateInterview from './pages/JobMandateInterview';
 
 // Inner component that uses auth context
 function AppContent() {
@@ -36,6 +37,7 @@ function AppContent() {
         <main className="flex-1 overflow-hidden pt-16">
           <Routes>
             <Route path="/" element={<MainPage />} />
+            <Route path="/job-mandate" element={<JobMandateInterview />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </main>

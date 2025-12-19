@@ -72,6 +72,35 @@ class AgentRunEventType(str, PyEnum):
     ERROR = "error"                # General error
     WARNING = "warning"            # Warning (non-fatal)
 
+
+class MandateStatus(str, PyEnum):
+    """Overall status of a job mandate"""
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    ARCHIVED = "archived"
+
+
+class MandateSectionStatus(str, PyEnum):
+    """Status of a mandate section"""
+    NOT_STARTED = "not_started"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class MandateSectionType(str, PyEnum):
+    """The four sections of a job mandate"""
+    ENERGIZES = "energizes"
+    STRENGTHS = "strengths"
+    MUST_HAVES = "must_haves"
+    DEAL_BREAKERS = "deal_breakers"
+
+
+class MandateItemSource(str, PyEnum):
+    """How a mandate item was created"""
+    EXTRACTED = "extracted"
+    USER_ADDED = "user_added"
+    USER_EDITED = "user_edited"
+
 Base = declarative_base()
 
 
@@ -360,3 +389,64 @@ class OAuthToken(Base):
 
     # Relationships
     user = relationship("User")
+
+
+class JobMandate(Base):
+    """Job search mandate capturing what user wants in their next role"""
+    __tablename__ = "job_mandates"
+
+    mandate_id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.user_id"), nullable=False, index=True)
+    conversation_id = Column(Integer, ForeignKey("conversations.conversation_id", ondelete="SET NULL"), nullable=True)
+
+    # Status
+    status = Column(Enum(MandateStatus, name='mandatestatus'), default=MandateStatus.IN_PROGRESS)
+    current_section = Column(Enum(MandateSectionType, name='mandatesectiontype'), default=MandateSectionType.ENERGIZES)
+
+    # Section statuses (stored as JSON for simplicity)
+    section_statuses = Column(JSON, default=lambda: {
+        "energizes": "in_progress",
+        "strengths": "not_started",
+        "must_haves": "not_started",
+        "deal_breakers": "not_started"
+    })
+
+    # Summary generated after completion
+    summary = Column(Text, nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    # Relationships
+    user = relationship("User")
+    conversation = relationship("Conversation")
+    items = relationship("JobMandateItem", back_populates="mandate", cascade="all, delete-orphan")
+
+
+class JobMandateItem(Base):
+    """Individual insight/bullet point in a job mandate"""
+    __tablename__ = "job_mandate_items"
+
+    item_id = Column(Integer, primary_key=True, index=True)
+    mandate_id = Column(Integer, ForeignKey("job_mandates.mandate_id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Classification
+    section = Column(Enum(MandateSectionType, name='mandatesectiontype'), nullable=False)
+    category = Column(String(100), nullable=True)  # Optional grouping within section
+
+    # Content
+    content = Column(Text, nullable=False)
+
+    # Source tracking
+    source = Column(Enum(MandateItemSource, name='mandateitemsource'), default=MandateItemSource.EXTRACTED)
+    source_message_id = Column(Integer, ForeignKey("messages.message_id", ondelete="SET NULL"), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    mandate = relationship("JobMandate", back_populates="items")
+    source_message = relationship("Message")

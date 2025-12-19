@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
     DocumentTextIcon,
@@ -18,6 +19,7 @@ interface FeatureCardProps {
     items: string[];
     status: 'not_started' | 'in_progress' | 'complete';
     onClick?: () => void;
+    route?: string;
 }
 
 function FeatureCard({ icon, title, description, items, status, onClick }: FeatureCardProps) {
@@ -73,6 +75,7 @@ function FeatureCard({ icon, title, description, items, status, onClick }: Featu
 
 export default function MainPage() {
     const { user } = useAuth();
+    const navigate = useNavigate();
     const [selectedFeature, setSelectedFeature] = useState<string | null>(null);
 
     const features: FeatureCardProps[] = [
@@ -98,7 +101,8 @@ export default function MainPage() {
                 "Must-haves in a new role",
                 "Deal-breakers to avoid"
             ],
-            status: 'not_started'
+            status: 'not_started',
+            route: '/job-mandate'
         },
         {
             icon: <SparklesIcon className="h-6 w-6 text-amber-600" />,
@@ -190,7 +194,13 @@ export default function MainPage() {
                         <FeatureCard
                             key={idx}
                             {...feature}
-                            onClick={() => setSelectedFeature(feature.title)}
+                            onClick={() => {
+                                if (feature.route) {
+                                    navigate(feature.route);
+                                } else {
+                                    setSelectedFeature(feature.title);
+                                }
+                            }}
                         />
                     ))}
                 </div>

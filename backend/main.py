@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, llm, search, web_retrieval, general_chat, conversations, memories, assets, profile, tools, oauth, agents, table, workflows
+from routers import auth, llm, search, web_retrieval, general_chat, conversations, memories, assets, profile, tools, oauth, agents, table, workflows, job_mandate
 from database import init_db
 from config import settings, setup_logging
 from middleware import LoggingMiddleware
@@ -61,6 +61,7 @@ app.include_router(oauth.router)
 app.include_router(agents.router)
 app.include_router(table.router)
 app.include_router(workflows.router)
+app.include_router(job_mandate.router)
 
 logger.info("Routers included")
 
