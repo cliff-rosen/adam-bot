@@ -333,7 +333,7 @@ class JobMandateChatService:
         When a section completes, your response should acknowledge this and transition to the next section:
         {self._get_next_section_intro(current_section)}
 
-        {"## INTERVIEW COMPLETE\nAll sections are done. Wrap up warmly and let them know their mandate is ready for the next steps." if all_complete else ""}
+        {"## INTERVIEW COMPLETE" + chr(10) + "All sections are done. Wrap up warmly and let them know their mandate is ready for the next steps." if all_complete else ""}
 
         ## Areas to Explore for This Section
 

@@ -41,6 +41,44 @@ This happens in a single LLM call, not two separate steps.
 
 ---
 
+### How We Get Structured Output (Tool Use)
+
+The LLM needs to return both a conversational response AND structured data (insights, decisions). We use Claude's **tool use** feature to achieve this reliably.
+
+#### What is Tool Use?
+
+Normally, LLMs return free-form text. But we need structured data we can process programmatically. Tool use lets us define a "tool" that the LLM must call with specific parameters.
+
+Think of it like giving someone a form to fill out instead of asking them to write a letter. The form guarantees you get the fields you need in the format you expect.
+
+#### The Interview Response Tool
+
+We define a tool called `interview_response` with this structure:
+
+```
+interview_response
+├── action: "extract" or "clarify" (required)
+├── insights: list of captured insights (optional)
+├── section_complete: true/false (optional)
+└── response: the message to show the user (required)
+```
+
+We tell Claude: "You MUST use this tool to submit your response." Claude then returns its answer by "calling" this tool with the appropriate values.
+
+#### Why Not Just Ask for JSON?
+
+We could ask the LLM to include JSON in its text response, but:
+
+| Approach | Problem |
+|----------|---------|
+| "Include JSON in your response" | LLM might forget, format it wrong, or mix it with text |
+| "Return only JSON" | Loses the conversational feel; harder to stream |
+| **Tool use** | Guarantees structure; LLM fills in the form correctly every time |
+
+Tool use is the most reliable way to get structured data from an LLM while still allowing natural language in the response field.
+
+---
+
 ### What the LLM Sees
 
 Each time the user sends a message, the LLM receives:
@@ -122,7 +160,8 @@ After all four sections complete, the mandate is finalized.
 | Requirement | How It's Fulfilled |
 |-------------|-------------------|
 | Conversational feel | LLM acts as a warm career coach, asks one question at a time |
-| Capture insights | Structured extraction with duplicate avoidance |
+| Capture insights | Structured extraction via tool use with duplicate avoidance |
 | Real-time progress | Side panel updates as insights are captured |
-| Extract vs. clarify | Single LLM decision based on input clarity |
+| Extract vs. clarify | Single LLM decision returned through `interview_response` tool |
 | Natural section flow | LLM determines completion based on quantity + user signals |
+| Reliable structure | Tool use guarantees we get data in the expected format every time |
