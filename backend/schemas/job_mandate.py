@@ -227,9 +227,24 @@ class InterviewState(BaseModel):
 # Stream Events (extends general chat events)
 # ============================================================================
 
+class MandateSectionUpdate(BaseModel):
+    """Lightweight section data for stream updates"""
+    status: str
+    items: List[dict]  # Simplified item dicts
+
+
+class MandateStateUpdate(BaseModel):
+    """Lightweight mandate state for stream updates"""
+    id: int
+    user_id: int
+    status: str
+    current_section: str
+    sections: dict[str, MandateSectionUpdate]
+
+
 class MandateUpdateEvent(BaseModel):
     """Event when mandate is updated during interview"""
     type: Literal["mandate_update"] = "mandate_update"
-    mandate: JobMandate
-    new_items: List[MandateItem] = []
+    mandate: MandateStateUpdate
+    new_items: List[dict] = []
     section_completed: Optional[MandateSectionType] = None

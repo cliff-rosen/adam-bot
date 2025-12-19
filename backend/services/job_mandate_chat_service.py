@@ -19,6 +19,8 @@ from schemas.job_mandate import (
     ExtractedInsight,
     InterviewState,
     MandateUpdateEvent,
+    MandateStateUpdate,
+    MandateSectionUpdate,
 )
 from schemas.general_chat import (
     ChatResponsePayload,
@@ -467,22 +469,22 @@ class JobMandateChatService:
 
         return chunks if chunks else [text]
 
-    def _state_to_mandate_response(self, mandate_id: int, state: InterviewState) -> Dict[str, Any]:
+    def _state_to_mandate_response(self, mandate_id: int, state: InterviewState) -> MandateStateUpdate:
         """Convert interview state to API response format."""
         mandate = self.mandate_service.get_mandate(mandate_id)
-        return {
-            "id": mandate_id,
-            "user_id": self.user_id,
-            "status": mandate.status.value,
-            "current_section": state.current_section.value,
-            "sections": {
-                st.value: {
-                    "status": s.status.value,
-                    "items": [{"id": i.id, "content": i.content, "category": i.category} for i in s.items]
-                }
+        return MandateStateUpdate(
+            id=mandate_id,
+            user_id=self.user_id,
+            status=mandate.status.value,
+            current_section=state.current_section.value,
+            sections={
+                st.value: MandateSectionUpdate(
+                    status=s.status.value,
+                    items=[{"id": i.id, "content": i.content, "category": i.category} for i in s.items]
+                )
                 for st, s in state.sections.items()
             }
-        }
+        )
 
     def _item_to_schema(self, item) -> Dict[str, Any]:
         """Convert a mandate item to dict."""
