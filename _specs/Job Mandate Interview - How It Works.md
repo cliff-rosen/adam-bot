@@ -41,23 +41,13 @@ Every LLM call = **instructions** + **context**
 
 Both should be maximally compressed. Maximum signal, minimum noise. The goal is not "send everything we have" — it's "send exactly what's needed for *this* decision."
 
-### The System Prompt Is Not Static
+### The Prompt Is Built Fresh Each Turn
 
 Basic thinking: "Here's my system prompt, I wrote it once."
 
-Better: The system prompt is *generated* each turn based on current state. Why explain all four sections when we're only working on one? Why describe the "completed" state when we're mid-interview?
+Better: The prompt is *generated* each turn based on current state. We pull the current section and captured items from the database, and build a focused prompt containing only what's relevant right now.
 
-The prompt for turn 1 can be different from turn 15. Tailor it.
-
-### The Levers
-
-| Lever | What You Control |
-|-------|------------------|
-| **System prompt** | Regenerate per turn. Only include instructions relevant to current state. |
-| **Conversation history** | Don't send raw messages. Send a digest: "User discussed X, Y, Z." |
-| **State injection** | Bullet points, not full records. "3 items captured" not the full objects. |
-| **Tool definitions** | Only expose tools the LLM can use right now. |
-| **User message framing** | Wrap input with context: "User is responding to a question about strengths." |
+Why explain all four sections when we're only working on one? Why list completed items from previous sections? Strip it down to what matters for *this* decision.
 
 ### The Mental Shift
 
