@@ -17,9 +17,13 @@ As the conversation progresses, insights appear in a side panel in real-time.
 
 Building a reliable LLM-powered interview requires solving two fundamental problems:
 
-### Problem 1: LLMs Are Expensive
+### Problem 1: Large Context Is Dilutive
 
-Every LLM call costs tokens. Naively sending the entire conversation history every time gets expensive fast.
+Every token you send competes for the LLM's attention. The more you send, the less focus on what matters. A 10,000-token context with your key instruction buried in the middle performs worse than a 500-token context where that instruction is front and center.
+
+This is expensive in two ways:
+- **Monetary**: More tokens = higher API costs
+- **Performance**: More noise = worse signal. The LLM's attention gets diluted.
 
 **Solution:** Store state in the database. Each turn, send only what the LLM needs to make *this specific decision* — a compressed summary, not the full history.
 
@@ -236,7 +240,7 @@ The backend looks up everything else from the database. This means:
 
 | Challenge | Solution |
 |-----------|----------|
-| LLMs are expensive | Store state in DB; send compressed context each turn |
+| Large context is dilutive (cost + performance) | Store state in DB; send compressed context each turn |
 | LLMs drift on complex instructions | One small job per turn; code manages workflow |
 | Need structured data | Tool use forces the LLM to fill out a form |
 | Need conversational feel | Response field in tool allows natural language |
