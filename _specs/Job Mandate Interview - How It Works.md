@@ -1,94 +1,128 @@
 # Job Mandate Interview - How It Works
 
-## Requirements
+## What We're Building
 
-The job mandate interview helps job seekers articulate what they want in their next role. The system must:
+The job mandate interview helps job seekers articulate what they want in their next role. It feels like talking to a career coach, not filling out a form. The system captures insights across four areas:
 
-1. **Conduct a conversational interview** - Feel like talking to a career coach, not filling out a form
-2. **Capture insights across four areas**:
-   - What energizes you
-   - Your strengths
-   - Must-haves (non-negotiables)
-   - Deal-breakers
-3. **Show progress in real-time** - As insights are captured, they appear in a side panel
-4. **Know when to extract vs. ask** - If user input is clear, capture it; if vague, ask follow-up questions
-5. **Advance sections naturally** - Move to the next section when enough has been captured (3-10 items)
+- What energizes you
+- Your strengths
+- Must-haves (non-negotiables)
+- Deal-breakers
+
+As the conversation progresses, insights appear in a side panel in real-time.
 
 ---
 
-## How the System Works
+## Why This Is Hard (And How We Solve It)
 
-### Single Decision Per Message
+Building a reliable LLM-powered interview requires solving two fundamental problems:
 
-When the user sends a message, the system makes **one unified decision**:
+### Problem 1: LLMs Are Expensive
+
+Every LLM call costs tokens. Naively sending the entire conversation history every time gets expensive fast.
+
+**Solution:** Store state in the database. Each turn, send only what the LLM needs to make *this specific decision* — a compressed summary, not the full history.
+
+### Problem 2: LLMs Don't Follow Complex Instructions Reliably
+
+If you tell an LLM "conduct a 4-part interview, capture insights, know when to move on" — it will eventually drift, forget sections, or go off-script.
+
+**Solution:** Don't ask the LLM to manage the workflow. Give it *one small job per turn*: evaluate this message, fill out a form. Your code handles everything else.
+
+---
+
+## Core Principle: Compress Everything
+
+Every LLM call = **instructions** + **context**
+
+Both should be maximally compressed. Maximum signal, minimum noise. The goal is not "send everything we have" — it's "send exactly what's needed for *this* decision."
+
+### The System Prompt Is Not Static
+
+Basic thinking: "Here's my system prompt, I wrote it once."
+
+Better: The system prompt is *generated* each turn based on current state. Why explain all four sections when we're only working on one? Why describe the "completed" state when we're mid-interview?
+
+The prompt for turn 1 can be different from turn 15. Tailor it.
+
+### The Levers
+
+| Lever | What You Control |
+|-------|------------------|
+| **System prompt** | Regenerate per turn. Only include instructions relevant to current state. |
+| **Conversation history** | Don't send raw messages. Send a digest: "User discussed X, Y, Z." |
+| **State injection** | Bullet points, not full records. "3 items captured" not the full objects. |
+| **Tool definitions** | Only expose tools the LLM can use right now. |
+| **User message framing** | Wrap input with context: "User is responding to a question about strengths." |
+
+### The Mental Shift
+
+Don't think: "Here's my prompt and the conversation."
+
+Think: "What's the *minimum* I need to send for the LLM to make *this specific decision* correctly?"
+
+Engineer backward from there.
+
+---
+
+## The Pattern: One Decision Per Turn
+
+When the user sends a message, the LLM makes **one decision**:
 
 ```
 User says something
-        ↓
+        |
    LLM evaluates
-        ↓
-┌───────┴───────┐
-│               │
-▼               ▼
-EXTRACT      CLARIFY
-(clear)      (vague)
+        |
+   +---------+
+   |         |
+   v         v
+EXTRACT   CLARIFY
+(clear)   (vague)
 ```
 
-- **Extract**: The user said something concrete. Capture 1-4 insights, then respond.
-- **Clarify**: The user was vague or off-topic. Ask a focused follow-up question. Capture nothing.
+- **Extract**: User said something concrete. Capture 1-4 insights, respond.
+- **Clarify**: User was vague. Ask a follow-up question. Capture nothing.
 
-This happens in a single LLM call, not two separate steps.
+This happens in a single LLM call. The LLM doesn't manage the interview — it just evaluates one message and fills out a form.
 
 ---
 
-### How We Get Structured Output (Tool Use)
+## Tool Use: Forcing Structured Output
 
-The LLM needs to return both a conversational response AND structured data (insights, decisions). We use Claude's **tool use** feature to achieve this reliably.
+The LLM needs to return both a conversational response AND structured data. We use **tool use** to guarantee this.
 
-#### What is Tool Use?
+### What Is Tool Use?
 
-Normally, LLMs return free-form text. But we need structured data we can process programmatically. Tool use lets us define a "tool" that the LLM must call with specific parameters.
+Normally, LLMs return free-form text. But we need structured data we can process. Tool use lets us define a "form" that the LLM *must* fill out.
 
-Think of it like giving someone a form to fill out instead of asking them to write a letter. The form guarantees you get the fields you need in the format you expect.
+Think of it like giving someone a form instead of asking them to write a letter. The form guarantees you get the fields you need in the format you expect.
 
-#### The Interview Response Tool
-
-We define a tool called `interview_response` with this structure:
+### The Interview Response Tool
 
 ```
 interview_response
-├── action: "extract" or "clarify" (required)
-├── insights: list of captured insights (optional)
-├── section_complete: true/false (optional)
-└── response: the message to show the user (required)
++-- action: "extract" or "clarify" (required)
++-- insights: list of captured insights (optional)
++-- section_complete: true/false (optional)
++-- response: the message to show the user (required)
 ```
 
-We tell Claude: "You MUST use this tool to submit your response." Claude then returns its answer by "calling" this tool with the appropriate values.
+We tell Claude: "You MUST use this tool." Claude returns its answer by "calling" this tool with the values filled in.
 
-#### Why Not Just Ask for JSON?
-
-We could ask the LLM to include JSON in its text response, but:
+### Why Not Just Ask for JSON?
 
 | Approach | Problem |
 |----------|---------|
-| "Include JSON in your response" | LLM might forget, format it wrong, or mix it with text |
-| "Return only JSON" | Loses the conversational feel; harder to stream |
-| **Tool use** | Guarantees structure; LLM fills in the form correctly every time |
-
-Tool use is the most reliable way to get structured data from an LLM while still allowing natural language in the response field.
+| "Include JSON in your response" | LLM might forget, format wrong, or mix with text |
+| "Return only JSON" | Loses conversational feel; harder to stream |
+| **Tool use** | Guarantees structure every time |
 
 ---
 
-### What the LLM Sees
+## What the LLM Sees (Example)
 
-Each time the user sends a message, the LLM receives:
-
-1. **Current section being worked on** (e.g., "What Energizes You")
-2. **Items already captured** in that section (to avoid duplicates)
-3. **Suggested areas to explore** (e.g., "What tasks make them lose track of time?")
-4. **Instructions** on when to extract vs. clarify
-
-Example context the LLM sees:
+Each turn, we build a focused prompt. Here's what the LLM might receive:
 
 ```
 ## Current Section: What Energizes You
@@ -99,25 +133,18 @@ Example context the LLM sees:
 
 **Target:** 3-10 insights per section
 
-For each user message, you must decide:
-1. If clear → extract insights, determine if section complete
-2. If vague → ask a follow-up question, extract nothing
+For this user message, decide:
+1. If clear -> extract insights, determine if section complete
+2. If vague -> ask a follow-up question, extract nothing
 ```
+
+Notice what's *not* there: the other three sections, historical messages, completed items from previous sections. Only what's needed for this decision.
 
 ---
 
-### What the LLM Returns
+## What the LLM Returns (Examples)
 
-The LLM must respond using a structured format:
-
-| Field | Purpose |
-|-------|---------|
-| `action` | "extract" or "clarify" |
-| `insights` | List of captured insights (only if extracting) |
-| `section_complete` | Should we move to the next section? |
-| `response` | The message shown to the user |
-
-Example when extracting:
+**When extracting:**
 ```json
 {
   "action": "extract",
@@ -126,130 +153,92 @@ Example when extracting:
     {"content": "Whiteboarding sessions with smart colleagues"}
   ],
   "section_complete": false,
-  "response": "Small teams and collaborative problem-solving - that's a clear pattern. **What about the problems themselves?** Are you drawn more to technical puzzles, strategic challenges, or something else?"
+  "response": "Small teams and collaborative problem-solving - that's a clear pattern. What about the problems themselves? Are you drawn more to technical puzzles, strategic challenges, or something else?"
 }
 ```
 
-Example when clarifying:
+**When clarifying:**
 ```json
 {
   "action": "clarify",
-  "response": "That's interesting! When you say you like 'interesting work,' **can you give me an example** of a project or task that felt really engaging to you?"
+  "response": "That's interesting! When you say you like 'interesting work,' can you give me an example of a project or task that felt really engaging?"
 }
 ```
 
 ---
 
-### Section Advancement
+## Section Advancement
 
 The LLM marks `section_complete: true` when:
-- At least 3 good insights have been captured, AND
+- At least 3 insights have been captured, AND
 - The user's response suggests they've covered the topic
 
 When a section completes:
-1. Current section is marked complete and collapses
-2. Next section becomes active and expands
+1. Current section collapses in the UI
+2. Next section becomes active
 3. The LLM's response acknowledges the transition
 
 After all four sections complete, the mandate is finalized.
 
 ---
 
-### State Management and Continuity
+## State Lives in the Database
 
-A key question: when the user sends a new message, how does the system know what's already been captured? Where does the state live?
-
-#### What's Stored Where
+The LLM is stateless. It doesn't remember previous turns. So where does state live?
 
 | Location | What's Stored | Why |
 |----------|---------------|-----|
-| **Backend Database** | Mandate record, all captured items, section statuses, conversation history | Permanent storage; survives page refreshes |
-| **Frontend (React)** | Current view of sections and items, UI state (which sections expanded) | Fast display; updates in real-time |
+| **Database** | Mandate record, captured items, section statuses, conversation | Permanent; survives refreshes |
+| **Frontend** | Current view, UI state (expanded sections) | Fast display; mirrors backend |
 
-The **backend is the source of truth**. The frontend mirrors it for display purposes.
+The **backend is the source of truth**. The frontend just displays what it receives.
 
-#### The Flow: How Continuity Works
+### The Flow
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 1. USER SENDS MESSAGE                                                    │
-│    Frontend sends: message + mandate_id + conversation_id                │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 2. BACKEND LOADS STATE FROM DATABASE                                     │
-│    - Fetches mandate record (current section, section statuses)          │
-│    - Fetches all items already captured                                  │
-│    - Fetches conversation history                                        │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 3. BACKEND BUILDS PROMPT WITH CURRENT STATE                              │
-│    - Includes: "Items captured so far: [list from database]"             │
-│    - Includes: "Current section: [from database]"                        │
-│    - Includes: Full conversation history                                 │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 4. LLM RESPONDS (via tool use)                                           │
-│    - Decides: extract or clarify                                         │
-│    - Returns: insights (if any), section_complete, response text         │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 5. BACKEND UPDATES DATABASE                                              │
-│    - Saves new items to database                                         │
-│    - Updates section status if advancing                                 │
-│    - Saves assistant message to conversation                             │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 6. BACKEND STREAMS UPDATES TO FRONTEND                                   │
-│    - Sends: mandate_update event (new items, updated sections)           │
-│    - Sends: text chunks (the response to display)                        │
-│    - Sends: complete event (final state)                                 │
-└─────────────────────────────────────────────────────────────────────────┘
-                                    ↓
-┌─────────────────────────────────────────────────────────────────────────┐
-│ 7. FRONTEND UPDATES ITS VIEW                                             │
-│    - Adds new items to section panel                                     │
-│    - Collapses completed section, expands new one                        │
-│    - Displays the response message                                       │
-└─────────────────────────────────────────────────────────────────────────┘
+1. USER SENDS MESSAGE
+   Frontend sends: message + mandate_id + conversation_id
+
+2. BACKEND LOADS STATE FROM DATABASE
+   Fetches: mandate, items, section statuses
+
+3. BACKEND BUILDS COMPRESSED PROMPT
+   Injects only: current section, items so far, relevant instructions
+
+4. LLM RESPONDS (via tool use)
+   Returns: action, insights (if any), section_complete, response
+
+5. BACKEND UPDATES DATABASE
+   Saves: new items, updated statuses, assistant message
+
+6. BACKEND STREAMS TO FRONTEND
+   Sends: mandate_update, text chunks, complete event
+
+7. FRONTEND UPDATES VIEW
+   Displays: new items, section transitions, response
 ```
 
-#### Key Point: Backend Fetches Its Own State
+### Why This Matters
 
-The frontend does **not** send the current mandate state with each message. It only sends:
+The frontend sends only:
 - The user's message
 - The mandate ID
 - The conversation ID
 
-The backend then **looks up everything it needs from the database**. This means:
-- The frontend can't get out of sync
-- If the user refreshes the page, the backend still has everything
-- Multiple devices would see the same state
-
-#### What the Frontend Receives Back
-
-After each message, the backend streams events to the frontend:
-
-1. **`mandate_update`** - Contains the new state of all sections and any new items
-2. **`text_delta`** - Chunks of the response text (for streaming display)
-3. **`complete`** - Final confirmation with conversation ID
-
-The frontend uses these events to update its local view, but it never needs to "remember" anything—it just reflects what the backend tells it.
+The backend looks up everything else from the database. This means:
+- Frontend can't get out of sync
+- Page refresh doesn't lose state
+- Multiple devices see the same data
 
 ---
 
 ## Summary
 
-| Requirement | How It's Fulfilled |
-|-------------|-------------------|
-| Conversational feel | LLM acts as a warm career coach, asks one question at a time |
-| Capture insights | Structured extraction via tool use with duplicate avoidance |
-| Real-time progress | Side panel updates as insights are captured |
-| Extract vs. clarify | Single LLM decision returned through `interview_response` tool |
-| Natural section flow | LLM determines completion based on quantity + user signals |
-| Reliable structure | Tool use guarantees we get data in the expected format every time |
-| State continuity | Backend fetches state from database; frontend just displays what it receives |
+| Challenge | Solution |
+|-----------|----------|
+| LLMs are expensive | Store state in DB; send compressed context each turn |
+| LLMs drift on complex instructions | One small job per turn; code manages workflow |
+| Need structured data | Tool use forces the LLM to fill out a form |
+| Need conversational feel | Response field in tool allows natural language |
+| State continuity | Backend fetches from DB; frontend just displays |
+| Reliable section flow | LLM decides completion; backend enforces transitions |
