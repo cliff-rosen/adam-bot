@@ -47,7 +47,7 @@ Basic thinking: "Here's my system prompt, I wrote it once."
 
 Better: The prompt is *generated* each turn based on current state. We pull the current section and captured items from the database, and build a focused prompt containing only what's relevant right now.
 
-Why explain all four sections when we're only working on one? Why list completed items from previous sections? Strip it down to what matters for *this* decision.
+Why explain all four sections when we're only working on one? Why include the tool calls and responses from previous turns? Strip out the internal machinery; keep the conversation and a focused state summary.
 
 ### The Mental Shift
 
@@ -132,7 +132,7 @@ For this user message, decide:
 2. If vague -> ask a follow-up question, extract nothing
 ```
 
-Notice what's *not* there: the other three sections, historical messages, completed items from previous sections. Only what's needed for this decision.
+The full conversation history is included (so the LLM has context), but notice what's *not* there: the tool calls and responses from prior turns, the other three sections, completed items from previous sections. The internal machinery is stripped out; only the state summary and the conversation itself.
 
 ---
 
